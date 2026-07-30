@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "contextflow-readonly": {
+      "command": "npm",
+      "args": ["run", "mcp:dev"],
+      "cwd": "/absolute/path/to/contextflow-ai-meeting-copilot"
+    }
+  }
+}
