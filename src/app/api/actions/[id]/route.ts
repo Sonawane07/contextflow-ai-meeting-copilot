@@ -1,16 +1,16 @@
-import { failure, success } from "@/lib/api-response";
-import {
-  actionRepository,
-  auditRepository,
-} from "@/lib/demo/repositories";
+import { failure, success, unauthorized } from "@/lib/api-response";
+import { getRequestContext } from "@/lib/request-context";
 import { actionDecisionSchema } from "@/lib/validation/actions";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
-export async function PATCH(request: Request, context: RouteContext) {
-  const { id } = await context.params;
+export async function PATCH(request: Request, routeContext: RouteContext) {
+  const context = await getRequestContext();
+  if (!context) return unauthorized();
+
+  const { id } = await routeContext.params;
   const payload: unknown = await request.json().catch(() => null);
   const parsed = actionDecisionSchema.safeParse(payload);
 
@@ -23,24 +23,40 @@ export async function PATCH(request: Request, context: RouteContext) {
     );
   }
 
-  const existing = await actionRepository.findById(id);
-  if (!existing) {
-    return failure(404, "ACTION_NOT_FOUND", "Action not found.");
-  }
-  if (existing.status !== "pending") {
+  try {
+    const existing = await context.actions.findById(id);
+    if (!existing) {
+      return failure(404, "ACTION_NOT_FOUND", "Action not found.");
+    }
+    if (existing.status !== "pending") {
+      return failure(
+        409,
+        "ACTION_ALREADY_DECIDED",
+        "This action already has a decision.",
+      );
+    }
+
+    // updateStatus only matches rows that are still pending, so a concurrent
+    // decision loses here rather than overwriting the first one.
+    const action = await context.actions.updateStatus(id, parsed.data.status);
+    if (!action) {
+      return failure(
+        409,
+        "ACTION_ALREADY_DECIDED",
+        "This action already has a decision.",
+      );
+    }
+
+    const auditLog = await context.audit.recordDecision(
+      action,
+      context.user.displayName,
+    );
+    return success({ action, auditLog }, { demoMode: context.demoMode });
+  } catch {
     return failure(
-      409,
-      "ACTION_ALREADY_DECIDED",
-      "This action already has a decision.",
+      500,
+      "ACTION_DECISION_FAILED",
+      "The decision could not be saved.",
     );
   }
-
-  const action = await actionRepository.updateStatus(id, parsed.data.status);
-  if (!action) {
-    return failure(404, "ACTION_NOT_FOUND", "Action not found.");
-  }
-  const auditLog = await auditRepository.recordDecision(action, "Demo User");
-  return success({ action, auditLog }, {
-    demoMode: process.env.DEMO_MODE !== "false",
-  });
 }

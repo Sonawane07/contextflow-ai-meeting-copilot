@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Brand } from "@/components/app-shell";
 import { DemoBadge } from "@/components/demo-badge";
 import { Icon } from "@/components/icons";
+import { isDemoMode } from "@/lib/supabase/config";
 
 const features = [
   {
@@ -28,6 +29,9 @@ const features = [
 ];
 
 export default function LandingPage() {
+  const demoMode = isDemoMode();
+  const entryHref = demoMode ? "/dashboard" : "/login";
+
   return (
     <main className="min-h-screen overflow-hidden bg-paper text-ink">
       <div className="landing-grid pointer-events-none absolute inset-0 h-[760px]" />
@@ -35,10 +39,10 @@ export default function LandingPage() {
         <Brand />
         <div className="flex items-center gap-3">
           <div className="hidden sm:block">
-            <DemoBadge />
+            <DemoBadge demoMode={demoMode} />
           </div>
-          <Link href="/dashboard" className="button-primary">
-            Open demo
+          <Link href={entryHref} className="button-primary">
+            {demoMode ? "Open demo" : "Sign in"}
             <Icon name="arrow" className="size-4" />
           </Link>
         </div>
@@ -58,14 +62,16 @@ export default function LandingPage() {
           </p>
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link
-              href="/dashboard"
+              href={entryHref}
               className="inline-flex min-h-13 items-center justify-center gap-2 rounded-xl bg-ink px-6 text-sm font-bold text-white shadow-[0_16px_36px_rgba(23,34,29,0.18)] transition-transform hover:-translate-y-0.5"
             >
-              Explore the working demo
+              {demoMode ? "Explore the working demo" : "Sign in to your workspace"}
               <Icon name="arrow" className="size-4" />
             </Link>
             <span className="px-4 text-xs font-semibold text-ink/40">
-              No account or API key required
+              {demoMode
+                ? "No account or API key required"
+                : "Your meetings stay scoped to your account"}
             </span>
           </div>
         </div>

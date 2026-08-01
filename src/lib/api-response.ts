@@ -9,6 +9,15 @@ export function success<T>(
   return NextResponse.json<ApiSuccess<T>>({ data, meta }, init);
 }
 
+/** Standard response for a request with no valid session. */
+export function unauthorized() {
+  return failure(
+    401,
+    "NOT_AUTHENTICATED",
+    "Sign in to continue.",
+  );
+}
+
 export function failure(
   status: number,
   code: string,

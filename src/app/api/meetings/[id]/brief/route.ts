@@ -1,19 +1,19 @@
-import { failure, success } from "@/lib/api-response";
+import { failure, success, unauthorized } from "@/lib/api-response";
 import { AIProviderError } from "@/lib/ai/anthropic-provider";
 import { getAIProvider } from "@/lib/ai/get-provider";
-import {
-  actionRepository,
-  meetingRepository,
-} from "@/lib/demo/repositories";
+import { getRequestContext } from "@/lib/request-context";
 import { meetingBriefSchema } from "@/lib/validation/brief";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
-export async function POST(_request: Request, context: RouteContext) {
-  const { id } = await context.params;
-  const meeting = await meetingRepository.findById(id);
+export async function POST(_request: Request, routeContext: RouteContext) {
+  const context = await getRequestContext();
+  if (!context) return unauthorized();
+
+  const { id } = await routeContext.params;
+  const meeting = await context.meetings.findById(id);
   if (!meeting) {
     return failure(404, "MEETING_NOT_FOUND", "Meeting not found.");
   }
@@ -26,18 +26,20 @@ export async function POST(_request: Request, context: RouteContext) {
       generatedAt: new Date().toISOString(),
       provider: provider.name,
     });
-    await meetingRepository.saveBrief(id, brief);
-    const actions = await actionRepository.upsertForMeeting(
+
+    // The brief is persisted first so that proposed actions can be attached to
+    // it. Regenerating a brief re-syncs its proposals without resetting any
+    // decision a human has already recorded.
+    await context.meetings.saveBrief(id, brief);
+    const actions = await context.actions.upsertForMeeting(
       meeting.id,
       meeting.title,
       brief.proposedActions,
     );
+
     return success(
       { brief, actions },
-      {
-        demoMode: provider.name === "mock",
-        provider: provider.name,
-      },
+      { demoMode: context.demoMode, provider: provider.name },
     );
   } catch (error) {
     if (error instanceof AIProviderError) {

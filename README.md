@@ -26,10 +26,11 @@ ContextFlow is a focused, human-in-the-loop meeting copilot that turns relevant 
 | --- | --- |
 | **Product focus** | Prepare for one selected meeting and review its proposed follow-ups |
 | **Safety boundary** | AI proposes; the user approves or rejects; the MVP never executes |
-| **Working surface** | Five responsive pages and six typed API routes |
+| **Working surface** | Six responsive pages and nine typed API routes |
 | **Default data path** | Synthetic seed data → in-memory repositories → deterministic mock provider |
+| **Persistent path** | Supabase Auth → RLS-scoped PostgreSQL repositories behind the same interfaces |
 | **Optional AI path** | Server-only Anthropic provider with Zod-validated JSON output |
-| **Production direction** | Supabase/PostgreSQL, pgvector retrieval, and durable Inngest workflows |
+| **Production direction** | pgvector retrieval and durable Inngest workflows |
 | **Local start** | `npm install && npm run dev` |
 
 ## The 30-second version
@@ -45,13 +46,15 @@ That separation is the product idea and the architectural boundary.
 
 ## Project status
 
-**Working portfolio MVP.** The complete demo flow runs locally without accounts, credentials, or external services. Local repositories hold synthetic data in process memory, so state resets when the development server restarts.
+**Working portfolio MVP with two runtime modes.** The complete demo flow runs locally without accounts, credentials, or external services; in-memory repositories hold synthetic data, so state resets when the development server restarts.
+
+Setting `DEMO_MODE=false` with a configured Supabase project switches the same routes onto authenticated, row-level-secured PostgreSQL repositories. A partially configured deployment stays in demo mode rather than failing at request time.
 
 The project deliberately separates:
 
-- **Implemented:** five responsive pages, six validated API routes, deterministic mock AI, optional server-only Anthropic provider, action approvals/rejections, audit history, tests, and CI.
-- **Illustrative production design:** Supabase/PostgreSQL with pgvector, an Inngest scheduled workflow, and a read-only MCP server.
-- **Planned:** authentication, durable storage, real calendar/email connectors, semantic retrieval, and action execution adapters.
+- **Implemented:** six responsive pages, nine validated API routes, email/password authentication, persistent Supabase repositories behind the same interfaces as the demo ones, deterministic mock AI, optional server-only Anthropic provider, action approvals/rejections, audit history, tests, and CI.
+- **Illustrative production design:** pgvector semantic retrieval, an Inngest scheduled workflow, and a read-only MCP server.
+- **Planned:** real calendar/email connectors, semantic retrieval, and action execution adapters.
 
 No production usage, performance metrics, or live third-party integrations are claimed.
 
@@ -99,6 +102,7 @@ All approved actions remain simulated. The demo does not send email, create task
 ### Product
 
 - Landing page with project positioning and direct demo entry.
+- Email/password sign-in and sign-up, with each account scoped to its own meetings, briefs, actions, and audit history.
 - Dashboard with upcoming meetings, pending decisions, recent briefs, and summary counts.
 - Meeting detail with focused context and brief generation.
 - Action center with pending, approved, and rejected views.
@@ -107,8 +111,11 @@ All approved actions remain simulated. The demo does not send email, create task
 ### Engineering
 
 - Strict TypeScript and shared domain types.
-- Interface-driven `MeetingRepository`, `ActionRepository`, `AuditRepository`, and `AIProvider` boundaries.
-- Zod validation for action mutations and AI output.
+- Interface-driven `MeetingRepository`, `ActionRepository`, `AuditRepository`, and `AIProvider` boundaries, with in-memory and Supabase implementations of each repository.
+- One request-scoped factory (`getRequestContext`) that resolves identity and repositories, so no route handler imports a concrete implementation.
+- Supabase Auth with server-side session verification, session refresh in `src/proxy.ts`, and row-level security policies scoping every table to `auth.uid()`.
+- Compare-and-set approval writes, so two concurrent decisions cannot both succeed.
+- Zod validation for credentials, action mutations, and AI output.
 - Typed JSON success/error envelopes.
 - Server-only Anthropic SDK access with safe validation failures.
 - Deterministic demo repositories backed by one in-memory store.
@@ -119,8 +126,7 @@ All approved actions remain simulated. The demo does not send email, create task
 
 The following are intentionally not implemented:
 
-- user authentication and organization membership;
-- persistent Supabase repositories;
+- organization membership and role-aware approval;
 - Gmail, Google Calendar, Slack, or task-system OAuth;
 - automatic background ingestion;
 - production embedding generation and semantic retrieval;
@@ -202,8 +208,9 @@ flowchart TD
 | Styling | Tailwind CSS 4 | Responsive design system and UI utilities |
 | Validation | Zod 4 | API mutation and AI-output validation |
 | AI | Mock provider; optional Anthropic SDK | Credential-free demo and opt-in model calls |
-| Test | Vitest, Testing Library, jsdom | Schema, provider, repository, API, and component tests |
-| Production examples | Supabase/PostgreSQL, pgvector, Inngest | Persistence, retrieval, scheduled workflows |
+| Test | Vitest, Testing Library, jsdom | Schema, provider, repository, auth, API, and component tests |
+| Persistence | Supabase (PostgreSQL), Supabase Auth, RLS | Accounts, per-user data, and policy-enforced scoping |
+| Production examples | pgvector, Inngest | Semantic retrieval and scheduled workflows |
 | AI development tooling | Claude Code artifacts, MCP SDK | Repeatable engineering instructions and read-only context |
 | Delivery | GitHub Actions, Vercel-compatible Next.js build | Automated quality checks and deployment readiness |
 
@@ -219,26 +226,36 @@ flowchart TD
 ├── src/
 │   ├── app/
 │   │   ├── api/
+│   │   │   ├── auth/            # sign-in, sign-up, sign-out
+│   │   │   └── ...
 │   │   ├── actions/
 │   │   ├── audit-log/
 │   │   ├── dashboard/
+│   │   ├── login/
 │   │   ├── meetings/[id]/
 │   │   └── page.tsx
 │   ├── components/
 │   ├── features/
 │   │   ├── actions/
+│   │   ├── auth/
 │   │   ├── briefs/
 │   │   ├── dashboard/
 │   │   └── meetings/
 │   ├── lib/
 │   │   ├── ai/
+│   │   ├── auth/               # session resolution, redirect safety
 │   │   ├── client/
-│   │   ├── demo/
+│   │   ├── demo/               # in-memory repositories
 │   │   ├── inngest/
-│   │   └── validation/
+│   │   ├── supabase/           # clients, db types, persistent repositories
+│   │   ├── validation/
+│   │   └── request-context.ts  # chooses identity + repository set
+│   ├── proxy.ts                # session refresh and page gating
 │   ├── test/
 │   └── types/
-├── supabase/migrations/001_initial_schema.sql
+├── supabase/migrations/
+│   ├── 001_initial_schema.sql
+│   └── 002_workspace_alignment.sql
 ├── tools/contextflow-mcp/
 ├── AGENTS.md
 ├── CLAUDE.md
@@ -287,9 +304,9 @@ Open `http://localhost:3000`.
 | `DEMO_MODE` | No | Defaults to demo behavior unless set to `false` |
 | `ANTHROPIC_API_KEY` | Anthropic only | Server-side API credential; never exposed to the client |
 | `ANTHROPIC_MODEL` | Anthropic only | Model identifier used by the optional provider |
-| `NEXT_PUBLIC_SUPABASE_URL` | Planned | Placeholder for a future browser-safe project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Planned | Placeholder for a future browser-safe anonymous key |
-| `SUPABASE_SERVICE_ROLE_KEY` | Planned, server only | Future privileged server operations |
+| `NEXT_PUBLIC_SUPABASE_URL` | Persistent mode | Browser-safe project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Persistent mode | Browser-safe anonymous key; relies on RLS for scoping |
+| `SUPABASE_SERVICE_ROLE_KEY` | Unused, server only | Bypasses RLS; never used by a request-scoped client |
 | `INNGEST_EVENT_KEY` | Planned | Future event publishing |
 | `INNGEST_SIGNING_KEY` | Planned | Future webhook verification |
 
@@ -310,7 +327,29 @@ It uses:
 - `MockAIProvider` for deterministic brief generation;
 - process-local repositories for actions and audit entries.
 
-Restarting the server resets all decisions. This is expected MVP behavior.
+Restarting the server resets all decisions. This is expected demo behavior.
+
+## Persistent mode setup
+
+Persistent mode swaps the in-memory repositories for authenticated Supabase ones. The API contracts, UI, and approval boundary are unchanged.
+
+1. Create a Supabase project and apply both migrations in `supabase/migrations` in order.
+2. Add the project URL and anon key to `.env.local`, and set `DEMO_MODE=false`:
+
+```dotenv
+DEMO_MODE=false
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+```
+
+3. Restart `npm run dev` and open `/login`. Create an account; a first sign-in seeds the same synthetic meetings, now owned by that account and subject to row-level security.
+
+Notes:
+
+- If either Supabase value is missing, the app stays in demo mode rather than failing at request time.
+- Only the anon key is used at request time. Tenant scoping is enforced by RLS policies, not by application-side filtering, so a policy regression surfaces as missing data rather than a silent cross-tenant read.
+- Sessions are verified with `getUser()`, which revalidates the token against the auth server, rather than trusting a cookie payload.
+- The redirect gate in `src/proxy.ts` is a convenience, not the security boundary; the API routes independently resolve a session and return 401.
 
 ## Optional Anthropic API setup
 
@@ -332,26 +371,30 @@ Then restart `npm run dev`. The provider:
 
 Do not prefix the API key with `NEXT_PUBLIC_`.
 
-## Supabase production design
+## Supabase persistence
 
-`supabase/migrations/001_initial_schema.sql` is an illustrative migration, not an active application dependency. It defines:
+`supabase/migrations` holds the applied schema for persistent mode:
 
-- `meetings`;
-- `context_items`;
-- `meeting_briefs`;
-- `proposed_actions`;
-- `audit_logs`.
+| Table | Purpose |
+| --- | --- |
+| `meetings` | Meeting metadata and attendees |
+| `context_items` | Focused per-meeting context, with an optional embedding |
+| `meeting_action_items` | Carry-over items from previous meetings |
+| `meeting_briefs` | The current generated brief for a meeting |
+| `proposed_actions` | AI proposals and their human decision |
+| `audit_logs` | Append-only record of approvals and rejections |
 
-Every table includes `user_id`. The example enables row-level security, adds user-scoped policies, and creates indexes for meeting, action, audit, and retrieval access patterns.
+Every table includes `user_id`, enables row-level security, and carries policies restricting rows to `auth.uid()`.
 
-A production implementation would:
+Design decisions worth reviewing:
 
-1. add Supabase authentication;
-2. resolve the current user on the server;
-3. implement repository interfaces with Supabase queries;
-4. use transactions or a database function for action decision plus audit insertion;
-5. restrict privileged keys to server runtimes;
-6. test RLS with multiple user identities before deployment.
+- **`source_key` natural keys.** The AI provider supplies its own action identifier, which is not a UUID. Rows keep a generated UUID primary key and upsert on `(meeting_id, source_key)`, so regenerating a brief re-syncs proposals without duplicating them.
+- **Decisions survive regeneration.** The upsert never writes `status` or `decided_at`, so re-running a brief cannot quietly reset an approval a human already made.
+- **Compare-and-set approvals.** `updateStatus` filters on `status = 'pending'`, so two concurrent decisions cannot both succeed; the second matches no row and the route returns 409. The route's own pending check is a friendly error message, not the safety property.
+- **Audit rows outlive their action.** `audit_logs.proposed_action_id` is nullable with `on delete set null`, and an update policy makes existing rows immutable. Deleting an action must not erase the record that someone approved it.
+- **Types are hand-authored.** `src/lib/supabase/database.types.ts` is written by hand so it can be diffed against the migrations in review. Every shape is a `type` alias, not an `interface`, because postgrest-js constrains rows to `Record<string, unknown>` and only type aliases receive an implicit index signature — using interfaces silently collapses every query result to `never`.
+
+Still outstanding: a transaction or database function covering the decision-plus-audit write as one unit, and RLS verification against a live multi-user project.
 
 ## pgvector retrieval design
 
@@ -386,14 +429,21 @@ It is labeled example-only and is not served in demo mode. Production work would
 
 All responses use either `{ "data": ... }` or `{ "error": { "code", "message", "details?" } }`.
 
+Every data route resolves a session first and returns `401 NOT_AUTHENTICATED` when there is none. In demo mode the session is a fixed synthetic identity, so the demo remains credential-free.
+
 | Method | Route | Behavior | Validation |
 | --- | --- | --- | --- |
-| `GET` | `/api/meetings` | Lists three seeded upcoming meetings | Typed repository output |
+| `POST` | `/api/auth/sign-up` | Creates an account and seeds its starter workspace | Zod credentials schema; 400 in demo mode |
+| `POST` | `/api/auth/sign-in` | Starts a session and sets the cookie | Zod credentials schema; generic 401 on failure |
+| `POST` | `/api/auth/sign-out` | Ends the session | 400 in demo mode |
+| `GET` | `/api/meetings` | Lists the caller's upcoming meetings | Typed repository output |
 | `GET` | `/api/meetings/[id]` | Returns one meeting and focused context | 404 for unknown ID |
 | `POST` | `/api/meetings/[id]/brief` | Generates, validates, and saves a brief; upserts proposals | Zod AI-output schema |
 | `GET` | `/api/actions` | Lists actions in newest-first order | Typed repository output |
 | `PATCH` | `/api/actions/[id]` | Applies an approved/rejected transition and records audit | Zod decision schema; 404/409 handling |
 | `GET` | `/api/audit-logs` | Lists decision history | Typed repository output |
+
+Sign-in failures deliberately return one generic message rather than distinguishing an unknown account from a wrong password, which would enumerate registered users.
 
 No additional public API routes are implemented.
 
@@ -490,13 +540,20 @@ Approval in this MVP means **permission recorded**, not **side effect executed**
 
 ## Testing strategy
 
-The suite contains seven test cases across five test files:
+The suite contains 33 test cases across nine test files:
 
 1. meeting brief Zod validation, including an invalid unsafe action type;
 2. deterministic mock AI generation;
 3. both approval and rejection transitions plus audit recording;
 4. the meetings API response envelope and seeded count;
-5. meeting-card content and accessible navigation.
+5. the meetings API 401 envelope when no session is present;
+6. runtime mode selection, including the rule that a partially configured project stays in demo mode;
+7. request-context resolution, including that an unauthenticated request returns null rather than falling back to seeded demo data;
+8. session identity derivation from Supabase user metadata and email;
+9. post-login redirect safety against protocol-relative and absolute URLs;
+10. meeting-card content and accessible navigation.
+
+The Supabase repositories are covered by typecheck and by the interface they share with the demo implementations; verifying their queries and RLS policies against a live multi-user project is still outstanding and is listed under known limitations.
 
 Run once:
 
@@ -564,14 +621,15 @@ Interactive pages call the same APIs a separate client could use. This makes loa
 
 ## Known limitations
 
-- No authentication, authorization, or durable database adapter.
 - No live Gmail, Google Calendar, Slack, Asana, or other third-party connection.
 - No actual action execution.
-- No cross-process consistency or concurrency control.
-- No brief history or action re-open workflow.
+- No brief history or action re-open workflow; regenerating a brief replaces it.
+- No organization membership, role-aware approval, or re-authentication for sensitive decisions.
 - No production telemetry, rate limits, or cost controls.
+- The demo path is single-process and resets on restart; concurrency guarantees apply to the Supabase path only.
 - The Anthropic path requires a user-supplied supported model identifier and has not been exercised by the credential-free test suite.
-- The Supabase, pgvector, and Inngest files are design examples, not live demo dependencies.
+- The persistent path is verified by typecheck, unit tests, and the migrations in `supabase/migrations`; the RLS policies have not yet been exercised against a live multi-user project.
+- The pgvector column and Inngest function remain design examples, not live dependencies.
 - Screenshots are intentionally absent until captured from a verified running deployment.
 - This lockfile currently reports 16 high-severity transitive `npm audit` findings, including advisories in the current Next.js dependency tree. npm's proposed forced fix includes breaking downgrades, so it was not applied; upgrade to patched upstream releases when available.
 
@@ -579,7 +637,7 @@ Interactive pages call the same APIs a separate client could use. This makes loa
 
 The safest path from MVP to production is incremental:
 
-1. **Identity and persistence:** add Supabase Auth, server-side session resolution, production repository adapters, transactions, and tested RLS.
+1. **Identity and persistence:** ✅ Supabase Auth, server-side session resolution, and persistent repository adapters are implemented. Remaining: a transaction covering the decision-plus-audit write, and RLS tested against multiple live identities.
 2. **Meeting-scoped connectors:** connect calendar metadata first, then allow a user to explicitly select mail/note sources for a meeting.
 3. **Retrieval pipeline:** normalize, embed, filter by tenant/time/type, rank, threshold, and preserve citations.
 4. **Durable generation:** serve the Inngest function, add idempotency, retry policy, provider timeouts, and generation history.
@@ -593,7 +651,7 @@ Every phase keeps the demo boundary honest: a feature moves from “planned” t
 
 | Phase | Outcome | Exit criterion |
 | --- | --- | --- |
-| 1 | Authenticated persistent workspace | Multi-user RLS tests pass and state survives deploys |
+| 1 | Authenticated persistent workspace | Implemented; exit criterion (multi-user RLS tests pass and state survives deploys) not yet met |
 | 2 | Meeting-scoped calendar context | User can connect, select, revoke, and delete data |
 | 3 | Citation-preserving retrieval | Every brief claim maps to an inspectable source |
 | 4 | Durable scheduled briefs | Idempotent jobs are observable and retry safely |

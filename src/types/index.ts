@@ -74,6 +74,15 @@ export interface AuditLog {
   timestamp: string;
 }
 
+export interface SessionUser {
+  id: string;
+  email: string;
+  displayName: string;
+  initials: string;
+  /** True when the request is served by the credential-free demo path. */
+  isDemo: boolean;
+}
+
 export interface ApiSuccess<T> {
   data: T;
   meta?: {

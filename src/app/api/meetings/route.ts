@@ -1,9 +1,14 @@
-import { success } from "@/lib/api-response";
-import { meetingRepository } from "@/lib/demo/repositories";
+import { failure, success, unauthorized } from "@/lib/api-response";
+import { getRequestContext } from "@/lib/request-context";
 
 export async function GET() {
-  const meetings = await meetingRepository.list();
-  return success(meetings, {
-    demoMode: process.env.DEMO_MODE !== "false",
-  });
+  const context = await getRequestContext();
+  if (!context) return unauthorized();
+
+  try {
+    const meetings = await context.meetings.list();
+    return success(meetings, { demoMode: context.demoMode });
+  } catch {
+    return failure(500, "MEETINGS_READ_FAILED", "Meetings could not be loaded.");
+  }
 }

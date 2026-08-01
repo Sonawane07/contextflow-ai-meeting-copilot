@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { DemoBadge } from "@/components/demo-badge";
 import { Icon, type IconName } from "@/components/icons";
+import { UserMenu } from "@/features/auth/user-menu";
+import type { SessionUser } from "@/types";
 
 const navigation: { href: string; label: string; icon: IconName }[] = [
   { href: "/dashboard", label: "Dashboard", icon: "home" },
@@ -24,7 +26,13 @@ export function Brand() {
   );
 }
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({
+  user,
+  children,
+}: {
+  user: SessionUser;
+  children: React.ReactNode;
+}) {
   const pathname = usePathname();
 
   return (
@@ -35,13 +43,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Brand />
           </Link>
           <div className="flex items-center gap-3">
-            <DemoBadge />
-            <div
-              className="hidden size-9 place-items-center rounded-full bg-ink text-xs font-bold text-white sm:grid"
-              aria-label="Signed in as Demo User"
-            >
-              DU
-            </div>
+            <DemoBadge demoMode={user.isDemo} />
+            <UserMenu user={user} />
           </div>
         </div>
       </header>

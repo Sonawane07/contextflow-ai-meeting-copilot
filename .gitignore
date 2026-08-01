@@ -25,3 +25,6 @@ next-env.d.ts
 
 # local scratch files
 /tmp/
+
+# personal documents kept alongside the repo, never part of the project
+/*.pdf
