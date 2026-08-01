@@ -243,6 +243,7 @@ export class SupabaseMeetingRepository implements MeetingRepository {
 }
 
 interface FollowUpJoinRow {
+  id: string;
   source_key: string;
   action_type: FollowUpAction["type"];
   title: string;
@@ -255,13 +256,21 @@ interface FollowUpJoinRow {
 }
 
 const FOLLOW_UP_SELECT = `
-  source_key, action_type, title, description, status, created_at, decided_at,
+  id, source_key, action_type, title, description, status, created_at, decided_at,
   meeting_id, meetings ( title )
 `;
 
+/**
+ * The row UUID is the public action id, not `source_key`.
+ *
+ * `source_key` is only unique per meeting: a provider may legitimately propose
+ * the same action key for two different meetings, and the unique index is on
+ * `(meeting_id, source_key)`. Exposing it as the id would make a per-user
+ * lookup ambiguous as soon as a second meeting is briefed.
+ */
 function toFollowUpAction(row: FollowUpJoinRow): FollowUpAction {
   return {
-    id: row.source_key,
+    id: row.id,
     type: row.action_type,
     title: row.title,
     description: row.description,
@@ -298,7 +307,7 @@ export class SupabaseActionRepository implements ActionRepository {
       .from("proposed_actions")
       .select(FOLLOW_UP_SELECT)
       .eq("user_id", this.userId)
-      .eq("source_key", id)
+      .eq("id", id)
       .maybeSingle()
       .overrideTypes<FollowUpJoinRow>();
 
@@ -323,7 +332,7 @@ export class SupabaseActionRepository implements ActionRepository {
       .from("proposed_actions")
       .update({ status, decided_at: new Date().toISOString() })
       .eq("user_id", this.userId)
-      .eq("source_key", id)
+      .eq("id", id)
       .eq("status", "pending")
       .select(FOLLOW_UP_SELECT)
       .maybeSingle()
@@ -453,27 +462,14 @@ export class SupabaseAuditRepository implements AuditRepository {
       throw new RepositoryError("Cannot audit an action without a decision.");
     }
 
-    const { data: actionRow, error: lookupError } = await this.client
-      .from("proposed_actions")
-      .select("id")
-      .eq("user_id", this.userId)
-      .eq("meeting_id", action.meetingId)
-      .eq("source_key", action.id)
-      .maybeSingle();
-
-    if (lookupError) {
-      throw new RepositoryError(
-        "The decided action could not be resolved.",
-        lookupError,
-      );
-    }
-
+    // `action.id` is already the proposed_actions row id, so no lookup is
+    // needed to resolve the foreign key.
     const { data, error } = await this.client
       .from("audit_logs")
       .insert({
         user_id: this.userId,
         meeting_id: action.meetingId,
-        proposed_action_id: actionRow?.id ?? null,
+        proposed_action_id: action.id,
         action_title: action.title,
         status: action.status,
         actor_label: actor,

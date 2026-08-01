@@ -346,6 +346,25 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
 
 3. Restart `npm run dev` and open `/login`. Create an account; a first sign-in seeds the same synthetic meetings, now owned by that account and subject to row-level security.
 
+### Verifying locally against a real database
+
+The persistent path can be exercised without a hosted project. This is how it was verified:
+
+```bash
+npx supabase init          # once
+npx supabase start         # boots PostgreSQL, Auth, and PostgREST in Docker
+npx supabase db reset      # applies every migration in supabase/migrations
+npx supabase status        # prints the local URL, anon key, and service-role key
+```
+
+Put those values in `.env.local` with `DEMO_MODE=false`, then run `npm run dev`. Sign up twice with different emails to confirm each account sees only its own workspace.
+
+For the scheduled workflow, add `INNGEST_DEV=1` to `.env.local` and run:
+
+```bash
+npx inngest-cli@latest dev -u http://localhost:3000/api/inngest
+```
+
 Notes:
 
 - If either Supabase value is missing, the app stays in demo mode rather than failing at request time.
@@ -396,7 +415,7 @@ Design decisions worth reviewing:
 - **Audit rows outlive their action.** `audit_logs.proposed_action_id` is nullable with `on delete set null`, and an update policy makes existing rows immutable. Deleting an action must not erase the record that someone approved it.
 - **Types are hand-authored.** `src/lib/supabase/database.types.ts` is written by hand so it can be diffed against the migrations in review. Every shape is a `type` alias, not an `interface`, because postgrest-js constrains rows to `Record<string, unknown>` and only type aliases receive an implicit index signature — using interfaces silently collapses every query result to `never`.
 
-Still outstanding: a transaction or database function covering the decision-plus-audit write as one unit, and RLS verification against a live multi-user project.
+Still outstanding: a transaction or database function covering the decision-plus-audit write as one unit.
 
 ## pgvector retrieval design
 
@@ -564,7 +583,7 @@ Approval in this MVP means **permission recorded**, not **side effect executed**
 
 ## Testing strategy
 
-The suite contains 46 test cases across eleven test files:
+The suite contains 48 test cases across eleven test files:
 
 1. meeting brief Zod validation, including an invalid unsafe action type;
 2. deterministic mock AI generation;
@@ -577,7 +596,8 @@ The suite contains 46 test cases across eleven test files:
 9. post-login redirect safety against protocol-relative and absolute URLs;
 10. UTC day-range derivation and half-open boundary handling for the scheduled workflow;
 11. Inngest event payload validation, including malformed and missing fields;
-12. meeting-card content and accessible navigation.
+12. mock-provider resolution by title, so persisted meetings with database ids do not all receive the same brief;
+13. meeting-card content and accessible navigation.
 
 The Supabase repositories are covered by typecheck and by the interface they share with the demo implementations; verifying their queries and RLS policies against a live multi-user project is still outstanding and is listed under known limitations.
 
@@ -683,10 +703,10 @@ Interactive pages call the same APIs a separate client could use. This makes loa
 - No production telemetry, rate limits, or cost controls.
 - The demo path is single-process and resets on restart; concurrency guarantees apply to the Supabase path only.
 - The Anthropic path requires a user-supplied supported model identifier and has not been exercised by the credential-free test suite.
-- The persistent path is verified by typecheck, unit tests, and the migrations in `supabase/migrations`; the RLS policies have not yet been exercised against a live multi-user project.
+- The persistent path is verified against a live PostgreSQL instance, including cross-tenant isolation with two accounts. It has not yet been exercised against a hosted Supabase project or under concurrent load.
 - The pgvector column remains a design example, not a live dependency.
 - The scheduled workflow uses a single UTC day window; per-recipient local-morning delivery needs a per-user time zone the schema does not yet store.
-- The Inngest functions are covered by unit tests of their pure helpers and payload validation; they have not been executed end to end against a live Inngest environment.
+- The Inngest functions are verified end to end against the Inngest dev server, including the cron fan-out, idempotent replay, and permanent-failure handling. They have not been run against Inngest Cloud.
 - Screenshots are intentionally absent until captured from a verified running deployment.
 - This lockfile currently reports 16 high-severity transitive `npm audit` findings, including advisories in the current Next.js dependency tree. npm's proposed forced fix includes breaking downgrades, so it was not applied; upgrade to patched upstream releases when available.
 
@@ -708,10 +728,10 @@ Every phase keeps the demo boundary honest: a feature moves from “planned” t
 
 | Phase | Outcome | Exit criterion |
 | --- | --- | --- |
-| 1 | Authenticated persistent workspace | Implemented; exit criterion (multi-user RLS tests pass and state survives deploys) not yet met |
+| 1 | Authenticated persistent workspace | Implemented; multi-user isolation verified locally. State-survives-deploys pending a hosted deployment |
 | 2 | Meeting-scoped calendar context | User can connect, select, revoke, and delete data |
 | 3 | Citation-preserving retrieval | Every brief claim maps to an inspectable source |
-| 4 | Durable scheduled briefs | Implemented; exit criterion (idempotent jobs observed retrying safely in a live environment) not yet met |
+| 4 | Durable scheduled briefs | Implemented; idempotent replay and permanent-failure handling observed against the Inngest dev server |
 | 5 | One controlled execution adapter | Approval, execution, and failure are separately audited |
 | 6 | Production hardening | Threat model, rate limits, retention, and runbooks are complete |
 
