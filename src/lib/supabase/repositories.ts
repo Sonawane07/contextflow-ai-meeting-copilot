@@ -26,8 +26,17 @@ export class RepositoryError extends Error {
 /**
  * Persistent repositories backed by Supabase/PostgreSQL.
  *
- * Reads rely on row-level security for tenant scoping; writes additionally set
- * `user_id` because the RLS `with check` clause requires it to match
+ * Tenant scoping is enforced twice, on purpose:
+ *
+ *  - Row-level security is the guarantee. On a request path the client carries
+ *    the caller's session, so policies constrain every row to `auth.uid()`.
+ *  - Every query also filters on `user_id` in application code. That is not
+ *    redundancy for its own sake: background jobs run through the service-role
+ *    client, which bypasses RLS entirely, and the explicit filter is the only
+ *    thing scoping them. Filtering in both places lets one implementation serve
+ *    both callers instead of maintaining a parallel unscoped copy.
+ *
+ * Writes set `user_id` because the RLS `with check` clause requires it to match
  * `auth.uid()`. A mismatch fails in the database rather than silently writing
  * another tenant's row.
  */
@@ -147,6 +156,7 @@ export class SupabaseMeetingRepository implements MeetingRepository {
     const { data, error } = await this.client
       .from("proposed_actions")
       .select("meeting_brief_id, source_key, action_type, title, description")
+      .eq("user_id", this.userId)
       .in("meeting_brief_id", briefIds)
       .order("created_at", { ascending: true });
 
@@ -180,6 +190,7 @@ export class SupabaseMeetingRepository implements MeetingRepository {
     const { data, error } = await this.client
       .from("meetings")
       .select(MEETING_SELECT)
+      .eq("user_id", this.userId)
       .order("starts_at", { ascending: true })
       .overrideTypes<MeetingJoinRow[]>();
 
@@ -193,6 +204,7 @@ export class SupabaseMeetingRepository implements MeetingRepository {
     const { data, error } = await this.client
       .from("meetings")
       .select(MEETING_SELECT)
+      .eq("user_id", this.userId)
       .eq("id", id)
       .maybeSingle()
       .overrideTypes<MeetingJoinRow>();
@@ -271,6 +283,7 @@ export class SupabaseActionRepository implements ActionRepository {
     const { data, error } = await this.client
       .from("proposed_actions")
       .select(FOLLOW_UP_SELECT)
+      .eq("user_id", this.userId)
       .order("created_at", { ascending: false })
       .overrideTypes<FollowUpJoinRow[]>();
 
@@ -284,6 +297,7 @@ export class SupabaseActionRepository implements ActionRepository {
     const { data, error } = await this.client
       .from("proposed_actions")
       .select(FOLLOW_UP_SELECT)
+      .eq("user_id", this.userId)
       .eq("source_key", id)
       .maybeSingle()
       .overrideTypes<FollowUpJoinRow>();
@@ -308,6 +322,7 @@ export class SupabaseActionRepository implements ActionRepository {
     const { data, error } = await this.client
       .from("proposed_actions")
       .update({ status, decided_at: new Date().toISOString() })
+      .eq("user_id", this.userId)
       .eq("source_key", id)
       .eq("status", "pending")
       .select(FOLLOW_UP_SELECT)
@@ -336,6 +351,7 @@ export class SupabaseActionRepository implements ActionRepository {
     const { data: briefRow, error: briefError } = await this.client
       .from("meeting_briefs")
       .select("id")
+      .eq("user_id", this.userId)
       .eq("meeting_id", meetingId)
       .maybeSingle();
 
@@ -367,6 +383,7 @@ export class SupabaseActionRepository implements ActionRepository {
     const { data, error: readError } = await this.client
       .from("proposed_actions")
       .select(FOLLOW_UP_SELECT)
+      .eq("user_id", this.userId)
       .eq("meeting_id", meetingId)
       .in("source_key", keys)
       .order("created_at", { ascending: true })
@@ -408,6 +425,7 @@ export class SupabaseAuditRepository implements AuditRepository {
     const { data, error } = await this.client
       .from("audit_logs")
       .select(AUDIT_SELECT)
+      .eq("user_id", this.userId)
       .order("created_at", { ascending: false })
       .overrideTypes<AuditJoinRow[]>();
 
@@ -438,6 +456,7 @@ export class SupabaseAuditRepository implements AuditRepository {
     const { data: actionRow, error: lookupError } = await this.client
       .from("proposed_actions")
       .select("id")
+      .eq("user_id", this.userId)
       .eq("meeting_id", action.meetingId)
       .eq("source_key", action.id)
       .maybeSingle();

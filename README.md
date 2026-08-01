@@ -30,7 +30,7 @@ ContextFlow is a focused, human-in-the-loop meeting copilot that turns relevant 
 | **Default data path** | Synthetic seed data → in-memory repositories → deterministic mock provider |
 | **Persistent path** | Supabase Auth → RLS-scoped PostgreSQL repositories behind the same interfaces |
 | **Optional AI path** | Server-only Anthropic provider with Zod-validated JSON output |
-| **Production direction** | pgvector retrieval and durable Inngest workflows |
+| **Production direction** | pgvector semantic retrieval with citation-preserving context |
 | **Local start** | `npm install && npm run dev` |
 
 ## The 30-second version
@@ -53,7 +53,7 @@ Setting `DEMO_MODE=false` with a configured Supabase project switches the same r
 The project deliberately separates:
 
 - **Implemented:** six responsive pages, nine validated API routes, email/password authentication, persistent Supabase repositories behind the same interfaces as the demo ones, deterministic mock AI, optional server-only Anthropic provider, action approvals/rejections, audit history, tests, and CI.
-- **Illustrative production design:** pgvector semantic retrieval, an Inngest scheduled workflow, and a read-only MCP server.
+- **Illustrative production design:** pgvector semantic retrieval and a read-only MCP server.
 - **Planned:** real calendar/email connectors, semantic retrieval, and action execution adapters.
 
 No production usage, performance metrics, or live third-party integrations are claimed.
@@ -210,7 +210,8 @@ flowchart TD
 | AI | Mock provider; optional Anthropic SDK | Credential-free demo and opt-in model calls |
 | Test | Vitest, Testing Library, jsdom | Schema, provider, repository, auth, API, and component tests |
 | Persistence | Supabase (PostgreSQL), Supabase Auth, RLS | Accounts, per-user data, and policy-enforced scoping |
-| Production examples | pgvector, Inngest | Semantic retrieval and scheduled workflows |
+| Background jobs | Inngest | Fan-out scheduled brief generation with retries and idempotency |
+| Production examples | pgvector | Semantic retrieval |
 | AI development tooling | Claude Code artifacts, MCP SDK | Repeatable engineering instructions and read-only context |
 | Delivery | GitHub Actions, Vercel-compatible Next.js build | Automated quality checks and deployment readiness |
 
@@ -227,6 +228,7 @@ flowchart TD
 │   ├── app/
 │   │   ├── api/
 │   │   │   ├── auth/            # sign-in, sign-up, sign-out
+│   │   │   ├── inngest/         # scheduled workflow endpoint
 │   │   │   └── ...
 │   │   ├── actions/
 │   │   ├── audit-log/
@@ -246,7 +248,7 @@ flowchart TD
 │   │   ├── auth/               # session resolution, redirect safety
 │   │   ├── client/
 │   │   ├── demo/               # in-memory repositories
-│   │   ├── inngest/
+│   │   ├── inngest/            # client, scheduled functions
 │   │   ├── supabase/           # clients, db types, persistent repositories
 │   │   ├── validation/
 │   │   └── request-context.ts  # chooses identity + repository set
@@ -306,9 +308,9 @@ Open `http://localhost:3000`.
 | `ANTHROPIC_MODEL` | Anthropic only | Model identifier used by the optional provider |
 | `NEXT_PUBLIC_SUPABASE_URL` | Persistent mode | Browser-safe project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Persistent mode | Browser-safe anonymous key; relies on RLS for scoping |
-| `SUPABASE_SERVICE_ROLE_KEY` | Unused, server only | Bypasses RLS; never used by a request-scoped client |
-| `INNGEST_EVENT_KEY` | Planned | Future event publishing |
-| `INNGEST_SIGNING_KEY` | Planned | Future webhook verification |
+| `SUPABASE_SERVICE_ROLE_KEY` | Scheduled jobs, server only | Bypasses RLS; used only by Inngest functions, never on a request path |
+| `INNGEST_EVENT_KEY` | Scheduled jobs | Publishing events to Inngest |
+| `INNGEST_SIGNING_KEY` | Scheduled jobs | Verifying inbound Inngest request signatures |
 
 `.env.example` contains names only. Never commit real values.
 
@@ -412,18 +414,40 @@ The intended retrieval flow is:
 
 This design avoids treating a person’s entire history as default prompt context. The embedding dimension and HNSW tuning must match the production embedding model and observed data distribution.
 
-## Inngest production workflow design
+## Inngest scheduled workflow
 
-`src/lib/inngest/functions/generate-daily-brief.ts` demonstrates a weekday 07:00 scheduled function with a durable step and retries.
+`src/app/api/inngest/route.ts` serves two functions in `src/lib/inngest/functions/generate-daily-brief.ts`:
 
-It is labeled example-only and is not served in demo mode. Production work would add:
+| Function | Trigger | Responsibility |
+| --- | --- | --- |
+| `schedule-daily-briefs` | Cron, weekdays 07:00 UTC | Finds users with meetings today and emits one event each |
+| `generate-daily-brief-for-user` | `contextflow/daily-brief.requested` | Generates and persists that user's briefs |
 
-- an authenticated Inngest route;
-- a user/time-zone fan-out strategy;
-- idempotency per user, meeting, and date;
-- rate and concurrency limits around provider calls;
-- durable persistence through repository adapters;
-- dead-letter handling and provider observability.
+Design decisions:
+
+- **Fan-out over a loop.** Each user is an independently retryable, independently observable unit. One user's provider failure cannot stall or fail everyone else's brief.
+- **Idempotency on `(userId, date)`.** A replayed or duplicated event does not trigger a second round of paid provider calls. The brief upsert is independently idempotent per meeting, so a partial retry rewrites the same content rather than duplicating it.
+- **Concurrency capped at 5.** The model API is the scarce resource, not the database.
+- **One step per meeting.** A failure retries only the affected meeting.
+- **`NonRetriableError` for permanent failures.** A malformed event payload or model output that fails Zod validation will not become valid on retry, so it fails fast instead of consuming the retry budget.
+- **Scheduled runs cannot reset a human decision.** They reuse the same action upsert, which never writes `status` or `decided_at`.
+- **Payloads are validated with Zod.** Inngest v4 carries no compile-time event schemas, and events can be replayed or hand-sent from the dashboard, so the handler does not trust their shape.
+
+Authenticity comes from Inngest's request signing, verified against `INNGEST_SIGNING_KEY`. Without that key the endpoint refuses to serve rather than executing unsigned invocations; this is not a public trigger. Both functions no-op in demo mode.
+
+Run it locally against the Inngest dev server:
+
+```bash
+npx inngest-cli@latest dev -u http://localhost:3000/api/inngest
+```
+
+Known limitation: the schedule uses a single UTC day window. Delivering each brief in the recipient's own morning needs a per-user time zone, which the schema does not yet store.
+
+### Background jobs and row-level security
+
+Scheduled runs have no session cookie, so no `auth.uid()` exists for RLS policies to match. They use the service-role client in `src/lib/supabase/admin.ts`, which **bypasses RLS**.
+
+The repositories therefore scope every query twice: RLS is the guarantee on request paths, and an explicit `user_id` filter in application code is what scopes the background path. Filtering in both places lets one repository implementation serve both callers rather than maintaining a parallel unscoped copy. The service-role client disables session persistence and must never be constructed on a request path.
 
 ## API route table
 
@@ -540,7 +564,7 @@ Approval in this MVP means **permission recorded**, not **side effect executed**
 
 ## Testing strategy
 
-The suite contains 33 test cases across nine test files:
+The suite contains 46 test cases across eleven test files:
 
 1. meeting brief Zod validation, including an invalid unsafe action type;
 2. deterministic mock AI generation;
@@ -551,7 +575,9 @@ The suite contains 33 test cases across nine test files:
 7. request-context resolution, including that an unauthenticated request returns null rather than falling back to seeded demo data;
 8. session identity derivation from Supabase user metadata and email;
 9. post-login redirect safety against protocol-relative and absolute URLs;
-10. meeting-card content and accessible navigation.
+10. UTC day-range derivation and half-open boundary handling for the scheduled workflow;
+11. Inngest event payload validation, including malformed and missing fields;
+12. meeting-card content and accessible navigation.
 
 The Supabase repositories are covered by typecheck and by the interface they share with the demo implementations; verifying their queries and RLS policies against a live multi-user project is still outstanding and is listed under known limitations.
 
@@ -629,7 +655,9 @@ Interactive pages call the same APIs a separate client could use. This makes loa
 - The demo path is single-process and resets on restart; concurrency guarantees apply to the Supabase path only.
 - The Anthropic path requires a user-supplied supported model identifier and has not been exercised by the credential-free test suite.
 - The persistent path is verified by typecheck, unit tests, and the migrations in `supabase/migrations`; the RLS policies have not yet been exercised against a live multi-user project.
-- The pgvector column and Inngest function remain design examples, not live dependencies.
+- The pgvector column remains a design example, not a live dependency.
+- The scheduled workflow uses a single UTC day window; per-recipient local-morning delivery needs a per-user time zone the schema does not yet store.
+- The Inngest functions are covered by unit tests of their pure helpers and payload validation; they have not been executed end to end against a live Inngest environment.
 - Screenshots are intentionally absent until captured from a verified running deployment.
 - This lockfile currently reports 16 high-severity transitive `npm audit` findings, including advisories in the current Next.js dependency tree. npm's proposed forced fix includes breaking downgrades, so it was not applied; upgrade to patched upstream releases when available.
 
@@ -640,7 +668,7 @@ The safest path from MVP to production is incremental:
 1. **Identity and persistence:** ✅ Supabase Auth, server-side session resolution, and persistent repository adapters are implemented. Remaining: a transaction covering the decision-plus-audit write, and RLS tested against multiple live identities.
 2. **Meeting-scoped connectors:** connect calendar metadata first, then allow a user to explicitly select mail/note sources for a meeting.
 3. **Retrieval pipeline:** normalize, embed, filter by tenant/time/type, rank, threshold, and preserve citations.
-4. **Durable generation:** serve the Inngest function, add idempotency, retry policy, provider timeouts, and generation history.
+4. **Durable generation:** ✅ the Inngest functions are served, with fan-out, idempotency, retries, and concurrency limits. Remaining: provider timeouts and generation history.
 5. **Approval hardening:** add payload previews, role-aware approval, immutable decision records, and re-authentication for sensitive actions.
 6. **Execution adapters:** introduce one adapter at a time; execute only approved actions with idempotency and separate execution audit events.
 7. **Operations:** add structured logs, traces, alerting, cost budgets, abuse controls, deletion workflows, and incident runbooks.
@@ -654,7 +682,7 @@ Every phase keeps the demo boundary honest: a feature moves from “planned” t
 | 1 | Authenticated persistent workspace | Implemented; exit criterion (multi-user RLS tests pass and state survives deploys) not yet met |
 | 2 | Meeting-scoped calendar context | User can connect, select, revoke, and delete data |
 | 3 | Citation-preserving retrieval | Every brief claim maps to an inspectable source |
-| 4 | Durable scheduled briefs | Idempotent jobs are observable and retry safely |
+| 4 | Durable scheduled briefs | Implemented; exit criterion (idempotent jobs observed retrying safely in a live environment) not yet met |
 | 5 | One controlled execution adapter | Approval, execution, and failure are separately audited |
 | 6 | Production hardening | Threat model, rate limits, retention, and runbooks are complete |
 

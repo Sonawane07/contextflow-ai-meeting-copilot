@@ -45,9 +45,14 @@ npm run build
 - Keep provider secrets and Anthropic calls server-only.
 - Resolve identity and repositories through `getRequestContext()`; do not import
   a repository implementation directly into a route handler.
-- Let row-level security scope reads. Set `user_id` on writes so the database
-  rejects a mismatch instead of application code silently masking one.
-- Never use the service-role key in a request-scoped client.
+- Scope every Supabase query twice: row-level security is the guarantee on
+  request paths, and an explicit `user_id` filter is what scopes background jobs
+  running through the service-role client, which bypasses RLS. Set `user_id` on
+  writes so the database rejects a mismatch.
+- Never construct the service-role client on a request path; it is for Inngest
+  functions only.
+- Validate Inngest event payloads with Zod and raise `NonRetriableError` for
+  failures that cannot succeed on retry.
 - Types under `src/lib/supabase/database.types.ts` must be `type` aliases, not
   interfaces, or postgrest-js collapses every query result to `never`.
 - Update `database.types.ts` in the same change as any migration.

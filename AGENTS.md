@@ -20,6 +20,7 @@ npm run mcp:dev
 - `src/features`: auth, meeting, brief, action, and dashboard modules
 - `src/lib`: AI providers, repositories, auth, validation, and examples
 - `src/lib/supabase`: clients, database types, persistent repositories
+- `src/lib/inngest`: client, scheduled functions, and pure date helpers
 - `src/proxy.ts`: session refresh and authenticated-page gating
 - `src/types`: shared domain and API types
 - `src/test`: test setup
