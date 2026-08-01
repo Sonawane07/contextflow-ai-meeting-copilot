@@ -614,6 +614,35 @@ npm run build
 
 The workflow uses only standard checkout and Node setup actions. It requires no secrets for the demo build.
 
+## Deployment
+
+The project builds and runs on Vercel with no adapter or custom configuration.
+
+### Demo deployment (no credentials)
+
+Import the repository and deploy. With `DEMO_MODE` unset or `true`, the app serves the full synthetic flow with no database, no account, and no API key. This is the right target for a public demo link.
+
+### Persistent deployment
+
+Set these project environment variables, then redeploy:
+
+| Variable | Value |
+| --- | --- |
+| `DEMO_MODE` | `false` |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service-role key, for scheduled jobs only |
+| `INNGEST_EVENT_KEY` | From the Inngest dashboard |
+| `INNGEST_SIGNING_KEY` | From the Inngest dashboard |
+| `ANTHROPIC_API_KEY` | Optional; enables the real provider |
+| `ANTHROPIC_MODEL` | Optional; a supported model identifier |
+
+Then apply both migrations in `supabase/migrations` to the Supabase project, and register `https://<deployment>/api/inngest` as an Inngest app so the scheduled functions are discovered.
+
+`DEMO_MODE` must be set **before** the build, not only at runtime: the identity-bearing pages are `force-dynamic` so they cannot be prerendered with the wrong mode, but the landing page's entry link is resolved during the build.
+
+Never set `ANTHROPIC_API_KEY` or `SUPABASE_SERVICE_ROLE_KEY` with a `NEXT_PUBLIC_` prefix; that would ship them to the browser.
+
 ## Design decisions
 
 ### One process-local store
