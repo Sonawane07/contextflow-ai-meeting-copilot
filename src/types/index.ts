@@ -83,6 +83,24 @@ export interface SessionUser {
   isDemo: boolean;
 }
 
+/** A calendar connection as the UI sees it — never carries a token. */
+export interface CalendarConnectionSummary {
+  provider: "google";
+  accountEmail: string;
+  /** When the current access token expires; it is refreshed automatically. */
+  expiresAt: string;
+  lastSyncedAt?: string;
+  lastSyncError?: string;
+  scope: string;
+}
+
+export interface CalendarSyncResult {
+  imported: number;
+  updated: number;
+  skipped: number;
+  syncedAt: string;
+}
+
 export interface ApiSuccess<T> {
   data: T;
   meta?: {

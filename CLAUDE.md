@@ -53,6 +53,11 @@ npm run build
   functions only.
 - Validate Inngest event payloads with Zod and raise `NonRetriableError` for
   failures that cannot succeed on retry.
+- Encrypt OAuth tokens with `src/lib/crypto/tokens.ts` before they reach the
+  database; never store or log one in plaintext.
+- Keep third-party scopes read-only and as narrow as the feature allows.
+- Calendar sync writes only `source = 'google_calendar'` rows and never
+  deletes: an imported meeting may carry a brief and approved actions.
 - Types under `src/lib/supabase/database.types.ts` must be `type` aliases, not
   interfaces, or postgrest-js collapses every query result to `never`.
 - Update `database.types.ts` in the same change as any migration.

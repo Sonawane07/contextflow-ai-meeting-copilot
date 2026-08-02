@@ -28,7 +28,7 @@ ContextFlow is a focused, human-in-the-loop meeting copilot that turns relevant 
 | --- | --- |
 | **Product focus** | Prepare for one selected meeting and review its proposed follow-ups |
 | **Safety boundary** | AI proposes; the user approves or rejects; the MVP never executes |
-| **Working surface** | Six responsive pages and nine typed API routes |
+| **Working surface** | Six responsive pages and thirteen typed API routes |
 | **Default data path** | Synthetic seed data → in-memory repositories → deterministic mock provider |
 | **Persistent path** | Supabase Auth → RLS-scoped PostgreSQL repositories behind the same interfaces |
 | **Optional AI path** | Server-only Anthropic provider with Zod-validated JSON output |
@@ -55,9 +55,9 @@ Setting `DEMO_MODE=false` with a configured Supabase project switches the same r
 
 The project deliberately separates:
 
-- **Implemented:** six responsive pages, nine validated API routes, email/password authentication, persistent Supabase repositories behind the same interfaces as the demo ones, deterministic mock AI, optional server-only Anthropic provider, action approvals/rejections, audit history, tests, and CI.
+- **Implemented:** six responsive pages, thirteen validated API routes, read-only Google Calendar import, email/password authentication, persistent Supabase repositories behind the same interfaces as the demo ones, deterministic mock AI, optional server-only Anthropic provider, action approvals/rejections, audit history, tests, and CI.
 - **Illustrative production design:** pgvector semantic retrieval and a read-only MCP server.
-- **Planned:** real calendar/email connectors, semantic retrieval, and action execution adapters.
+- **Planned:** Gmail and Slack connectors, semantic retrieval, and action execution adapters.
 
 No production usage, performance metrics, or live third-party integrations are claimed.
 
@@ -110,6 +110,7 @@ All approved actions remain simulated. The demo does not send email, create task
 - Meeting detail with focused context and brief generation.
 - Action center with pending, approved, and rejected views.
 - Audit log with decision metadata.
+- Read-only Google Calendar connection: import upcoming events as meetings, re-sync on demand, disconnect and revoke.
 
 ### Engineering
 
@@ -118,6 +119,7 @@ All approved actions remain simulated. The demo does not send email, create task
 - One request-scoped factory (`getRequestContext`) that resolves identity and repositories, so no route handler imports a concrete implementation.
 - Supabase Auth with server-side session verification, session refresh in `src/proxy.ts`, and row-level security policies scoping every table to `auth.uid()`.
 - Compare-and-set approval writes, so two concurrent decisions cannot both succeed.
+- Google OAuth with PKCE, CSRF state in httpOnly cookies, and AES-256-GCM encryption of access and refresh tokens before they reach the database.
 - Zod validation for credentials, action mutations, and AI output.
 - Typed JSON success/error envelopes.
 - Server-only Anthropic SDK access with safe validation failures.
@@ -130,7 +132,7 @@ All approved actions remain simulated. The demo does not send email, create task
 The following are intentionally not implemented:
 
 - organization membership and role-aware approval;
-- Gmail, Google Calendar, Slack, or task-system OAuth;
+- Gmail, Slack, or task-system OAuth;
 - automatic background ingestion;
 - production embedding generation and semantic retrieval;
 - actual email, task, or scheduling execution;
@@ -465,6 +467,56 @@ npx inngest-cli@latest dev -u http://localhost:3000/api/inngest
 
 Known limitation: the schedule uses a single UTC day window. Delivering each brief in the recipient's own morning needs a per-user time zone, which the schema does not yet store.
 
+## Google Calendar
+
+Read-only import of upcoming events as meetings. ContextFlow never writes to a calendar — the only scope requested is `calendar.readonly`, plus `userinfo.email` so the UI can name the connected account.
+
+### Setup
+
+1. Create a project at [console.cloud.google.com](https://console.cloud.google.com), then enable the **Google Calendar API**.
+2. Configure the OAuth consent screen as **External**, leave the publishing status on **Testing**, and add your own Google account under **Test users**.
+3. Create an **OAuth client ID** of type *Web application* and register the redirect URI verbatim — Google matches it exactly:
+
+   ```
+   http://localhost:3000/api/integrations/google/callback
+   ```
+
+4. Generate a token-encryption key:
+
+   ```bash
+   openssl rand -base64 32
+   ```
+
+   Then put everything in `.env.local`:
+
+   ```dotenv
+   GOOGLE_CLIENT_ID=...apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=...
+   GOOGLE_REDIRECT_URI=http://localhost:3000/api/integrations/google/callback
+   TOKEN_ENCRYPTION_KEY=<the generated key>
+   ```
+
+5. Restart, sign in, and use **Connect calendar** on the dashboard.
+
+Google verification is **not** required for personal use. It applies to publishing an app publicly; an app left in Testing status may add up to 100 test users with no review.
+
+> [!IMPORTANT]
+> While the OAuth app is in **Testing** status, Google expires the refresh token after **seven days**. The scheduled brief job will start failing then until the calendar is reconnected. A Google Workspace account can set the consent screen to *Internal*, where refresh tokens do not expire.
+
+### Design decisions
+
+- **Tokens are encrypted before storage.** A refresh token is a long-lived credential to someone's calendar, so row-level security alone is not sufficient — anyone with a database dump would hold the tokens. `src/lib/crypto/tokens.ts` uses AES-256-GCM with a key that lives only in the environment. GCM rather than CBC so that tampering fails decryption instead of silently yielding different plaintext.
+- **PKCE, despite this being a confidential client.** The authorization code travels back through the browser; a code intercepted there is useless without the verifier, which never leaves the server.
+- **CSRF state and the PKCE verifier live in short-lived httpOnly cookies.** They only need to survive the round trip to Google, and the callback is their sole reader. State is compared in constant time.
+- **Sync is an idempotent upsert** on `(user_id, source, external_ref)`, so re-running updates a renamed or moved event rather than duplicating it.
+- **Synced rows carry `source = 'google_calendar'`.** Sync only ever touches those, so the synthetic starter workspace and any hand-made meetings are never overwritten.
+- **Sync never deletes.** An event cancelled in Google stays until removed deliberately, because a meeting may carry a brief and approved actions — records of decisions a person made.
+- **All-day entries are skipped.** Holidays, PTO, and reminders live there; briefing them is noise rather than signal.
+- **Disconnecting revokes at Google, then deletes locally** — and deletes even when revocation fails, since an already-expired token returns an error and refusing would strand the user with a connection they cannot remove.
+- **Imported meetings survive a disconnect**, for the same reason sync never deletes.
+
+Failure modes surface as typed errors: an expired grant returns `409 GOOGLE_REAUTH_REQUIRED` rather than a generic 500, because it needs a reconnect rather than a retry.
+
 ### Background jobs and row-level security
 
 Scheduled runs have no session cookie, so no `auth.uid()` exists for RLS policies to match. They use the service-role client in `src/lib/supabase/admin.ts`, which **bypasses RLS**.
@@ -488,6 +540,11 @@ Every data route resolves a session first and returns `401 NOT_AUTHENTICATED` wh
 | `GET` | `/api/actions` | Lists actions in newest-first order | Typed repository output |
 | `PATCH` | `/api/actions/[id]` | Applies an approved/rejected transition and records audit | Zod decision schema; 404/409 handling |
 | `GET` | `/api/audit-logs` | Lists decision history | Typed repository output |
+| `GET` | `/api/integrations` | Reports what this deployment and user have connected | Never returns a token |
+| `GET` | `/api/integrations/google/start` | Redirects to Google consent with PKCE + CSRF state | 503 when unconfigured |
+| `GET` | `/api/integrations/google/callback` | Verifies state, exchanges the code, stores encrypted tokens | Redirects with a status code, never echoes provider errors |
+| `POST` | `/api/integrations/google/sync` | Imports upcoming events as meetings | 409 when the grant needs renewing |
+| `POST` | `/api/integrations/google/disconnect` | Revokes at Google and deletes the connection | Keeps imported meetings |
 
 Sign-in failures deliberately return one generic message rather than distinguishing an unknown account from a wrong password, which would enumerate registered users.
 
@@ -586,7 +643,7 @@ Approval in this MVP means **permission recorded**, not **side effect executed**
 
 ## Testing strategy
 
-The suite contains 48 test cases across eleven test files:
+The suite contains 84 test cases across fourteen test files:
 
 1. meeting brief Zod validation, including an invalid unsafe action type;
 2. deterministic mock AI generation;
@@ -600,7 +657,10 @@ The suite contains 48 test cases across eleven test files:
 10. UTC day-range derivation and half-open boundary handling for the scheduled workflow;
 11. Inngest event payload validation, including malformed and missing fields;
 12. mock-provider resolution by title, so persisted meetings with database ids do not all receive the same brief;
-13. meeting-card content and accessible navigation.
+13. token encryption round-trip, tamper detection, and key-misconfiguration handling;
+14. Google Calendar event mapping, including all-day exclusion, room filtering, and HTML stripping;
+15. the authorization URL, asserting PKCE S256, forced consent, and read-only scope;
+16. meeting-card content and accessible navigation.
 
 The Supabase repositories are covered by typecheck and by the interface they share with the demo implementations; verifying their queries and RLS policies against a live multi-user project is still outstanding and is listed under known limitations.
 
@@ -701,7 +761,7 @@ Interactive pages call the same APIs a separate client could use. This makes loa
 
 ## Known limitations
 
-- No live Gmail, Google Calendar, Slack, Asana, or other third-party connection.
+- No live Gmail, Slack, Asana, or other third-party connection. Google Calendar is implemented but read-only, and imports events only — it never writes to a calendar.
 - No actual action execution.
 - No brief history or action re-open workflow; regenerating a brief replaces it.
 - No organization membership, role-aware approval, or re-authentication for sensitive decisions.

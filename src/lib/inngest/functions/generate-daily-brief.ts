@@ -5,6 +5,7 @@ import { getAIProvider } from "@/lib/ai/get-provider";
 import { AIProviderError } from "@/lib/ai/anthropic-provider";
 import { DAILY_BRIEF_REQUESTED, inngest } from "@/lib/inngest/client";
 import { isWithinRange, utcDayRange } from "@/lib/inngest/day-range";
+import { syncCalendar } from "@/lib/integrations/google/sync";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { isDemoMode } from "@/lib/supabase/config";
 import {
@@ -101,6 +102,21 @@ export const generateDailyBriefForUser = inngest.createFunction(
       );
     }
     const { userId, date } = parsed.data;
+
+    // Refresh the calendar first so the day's briefs reflect what is actually
+    // on it. Its own step, and deliberately non-fatal: a revoked Google grant
+    // must not stop briefs being generated for meetings already imported.
+    await step.run("sync-calendar", async () => {
+      const admin = createSupabaseAdminClient();
+      try {
+        return await syncCalendar(admin, userId);
+      } catch (error) {
+        return {
+          skipped: true,
+          reason: error instanceof Error ? error.message : "unknown",
+        };
+      }
+    });
 
     const meetings = await step.run("load-todays-meetings", async () => {
       const admin = createSupabaseAdminClient();

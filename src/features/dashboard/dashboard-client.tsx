@@ -6,6 +6,7 @@ import { Icon } from "@/components/icons";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, ErrorState, LoadingCards } from "@/components/states";
 import { ActionCard } from "@/features/actions/action-card";
+import { CalendarConnectionCard } from "@/features/integrations/calendar-connection-card";
 import { MeetingCard } from "@/features/meetings/meeting-card";
 import { fetchData } from "@/lib/client/fetch-json";
 import { formatRelativeDate } from "@/lib/format";
@@ -99,6 +100,8 @@ export function DashboardClient() {
       </div>
 
       {error ? <ErrorState message={error} onRetry={load} /> : null}
+
+      <CalendarConnectionCard onSynced={load} />
 
       <section aria-labelledby="upcoming-heading">
         <div className="mb-4 flex items-end justify-between">

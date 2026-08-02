@@ -26,16 +26,34 @@ export type AttendeeJson = {
   initials: string;
 };
 
+export type MeetingSourceColumn = "seed" | "google_calendar";
+
 type MeetingRow = {
   id: string;
   user_id: string;
   external_ref: string | null;
+  source: MeetingSourceColumn;
   title: string;
   summary: string;
   starts_at: string;
   ends_at: string;
   location: string;
   attendees: AttendeeJson[];
+  created_at: string;
+  updated_at: string;
+};
+
+type CalendarConnectionRow = {
+  id: string;
+  user_id: string;
+  provider: "google";
+  account_email: string;
+  access_token_encrypted: string;
+  refresh_token_encrypted: string | null;
+  access_token_expires_at: string;
+  scope: string;
+  last_synced_at: string | null;
+  last_sync_error: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -158,6 +176,14 @@ export type Database = {
       audit_logs: Table<
         AuditLogRow,
         "user_id" | "meeting_id" | "action_title" | "status" | "actor_label"
+      >;
+      calendar_connections: Table<
+        CalendarConnectionRow,
+        | "user_id"
+        | "provider"
+        | "account_email"
+        | "access_token_encrypted"
+        | "access_token_expires_at"
       >;
     };
     Views: Record<string, never>;
