@@ -42,8 +42,12 @@ export async function POST(_request: Request, routeContext: RouteContext) {
       { demoMode: context.demoMode, provider: provider.name },
     );
   } catch (error) {
+    // The provider has already reduced this to an operator-actionable
+    // sentence with nothing sensitive in it, so it is safe to pass through —
+    // a misconfigured key or an empty account would otherwise be
+    // indistinguishable from a bug.
     if (error instanceof AIProviderError) {
-      return failure(502, "AI_RESPONSE_INVALID", error.message);
+      return failure(502, "AI_PROVIDER_ERROR", error.message);
     }
     return failure(
       500,

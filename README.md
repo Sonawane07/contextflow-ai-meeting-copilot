@@ -397,6 +397,17 @@ Then restart `npm run dev`. The provider:
 
 Do not prefix the API key with `NEXT_PUBLIC_`.
 
+Provider failures are translated into an actionable sentence rather than a generic error, because each one is a configuration or account problem rather than a bug:
+
+| Failure | What the caller sees |
+| --- | --- |
+| No credit on the account | `The Anthropic account has no credit. Add credits in Plans & Billing.` |
+| Bad or revoked key | `Anthropic rejected the API key. Check ANTHROPIC_API_KEY.` |
+| Unknown model id | `The configured ANTHROPIC_MODEL does not exist.` |
+| Rate limited | `Anthropic is rate limiting this key. Try again shortly.` |
+
+The provider's raw message is never forwarded — it can echo request content, which here means meeting data. A key with no credit returns a 400, so untranslated it would read as a malformed request.
+
 ## Supabase persistence
 
 `supabase/migrations` holds the applied schema for persistent mode:
@@ -536,7 +547,7 @@ Every data route resolves a session first and returns `401 NOT_AUTHENTICATED` wh
 | `POST` | `/api/auth/sign-out` | Ends the session | 400 in demo mode |
 | `GET` | `/api/meetings` | Lists the caller's upcoming meetings | Typed repository output |
 | `GET` | `/api/meetings/[id]` | Returns one meeting and focused context | 404 for unknown ID |
-| `POST` | `/api/meetings/[id]/brief` | Generates, validates, and saves a brief; upserts proposals | Zod AI-output schema |
+| `POST` | `/api/meetings/[id]/brief` | Generates, validates, and saves a brief; upserts proposals | Zod AI-output schema; 502 `AI_PROVIDER_ERROR` names the provider failure |
 | `GET` | `/api/actions` | Lists actions in newest-first order | Typed repository output |
 | `PATCH` | `/api/actions/[id]` | Applies an approved/rejected transition and records audit | Zod decision schema; 404/409 handling |
 | `GET` | `/api/audit-logs` | Lists decision history | Typed repository output |
@@ -643,7 +654,7 @@ Approval in this MVP means **permission recorded**, not **side effect executed**
 
 ## Testing strategy
 
-The suite contains 84 test cases across fourteen test files:
+The suite contains 90 test cases across fifteen test files:
 
 1. meeting brief Zod validation, including an invalid unsafe action type;
 2. deterministic mock AI generation;
@@ -660,7 +671,8 @@ The suite contains 84 test cases across fourteen test files:
 13. token encryption round-trip, tamper detection, and key-misconfiguration handling;
 14. Google Calendar event mapping, including all-day exclusion, room filtering, and HTML stripping;
 15. the authorization URL, asserting PKCE S256, forced consent, and read-only scope;
-16. meeting-card content and accessible navigation.
+16. Anthropic error translation, asserting a billing failure is named as one and the provider's raw message never reaches the caller;
+17. meeting-card content and accessible navigation.
 
 The Supabase repositories are covered by typecheck and by the interface they share with the demo implementations; verifying their queries and RLS policies against a live multi-user project is still outstanding and is listed under known limitations.
 
