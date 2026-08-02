@@ -28,3 +28,8 @@ next-env.d.ts
 
 # personal documents kept alongside the repo, never part of the project
 /*.pdf
+.vercel
+
+# Every env file is local-only except the committed template.
+.env*
+!.env.example

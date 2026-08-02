@@ -13,12 +13,14 @@ ContextFlow is a focused, human-in-the-loop meeting copilot that turns relevant 
   <img alt="Human approval required" src="https://img.shields.io/badge/Actions-Human_approval_required-ed735a?style=for-the-badge&labelColor=17221d">
 </p>
 
-[Run the demo](#three-minute-demo-flow) · [Explore the architecture](#architecture-overview) · [Inspect the safety model](#human-in-the-loop-approval-design) · [Review the code](#what-a-technical-reviewer-should-inspect)
+**[▶ Open the live demo](https://contextflow-ai-meeting-copilot-jkkpipfqw.vercel.app)**
+
+[Run it locally](#three-minute-demo-flow) · [Explore the architecture](#architecture-overview) · [Inspect the safety model](#human-in-the-loop-approval-design) · [Review the code](#what-a-technical-reviewer-should-inspect)
 
 </div>
 
 > [!NOTE]
-> The entire core flow works locally with synthetic data and deterministic mock AI. No account, API key, mailbox, calendar, or external service is required.
+> The live demo and the local default both run on synthetic data with deterministic mock AI. No account, API key, mailbox, calendar, or external service is required — open the link and click through the whole flow.
 
 ## At a glance
 
@@ -31,6 +33,7 @@ ContextFlow is a focused, human-in-the-loop meeting copilot that turns relevant 
 | **Persistent path** | Supabase Auth → RLS-scoped PostgreSQL repositories behind the same interfaces |
 | **Optional AI path** | Server-only Anthropic provider with Zod-validated JSON output |
 | **Production direction** | pgvector semantic retrieval with citation-preserving context |
+| **Live demo** | [contextflow-ai-meeting-copilot-jkkpipfqw.vercel.app](https://contextflow-ai-meeting-copilot-jkkpipfqw.vercel.app) |
 | **Local start** | `npm install && npm run dev` |
 
 ## The 30-second version
@@ -641,6 +644,8 @@ The project builds and runs on Vercel with no adapter or custom configuration.
 ### Demo deployment (no credentials)
 
 Import the repository and deploy. With `DEMO_MODE` unset or `true`, the app serves the full synthetic flow with no database, no account, and no API key. This is the right target for a public demo link.
+
+The live demo above is exactly this: `DEMO_MODE=true`, no Supabase project attached, no provider key. Vercel gates a first deployment behind SSO by default; making it publicly readable is `vercel project protection disable <project> --sso`.
 
 ### Persistent deployment
 
