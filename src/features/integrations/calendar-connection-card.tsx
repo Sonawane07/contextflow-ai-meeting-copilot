@@ -93,13 +93,17 @@ export function CalendarConnectionCard({
         "/api/integrations/google/sync",
         { method: "POST" },
       );
-      const { imported, updated } = response.data;
+      const { imported, updated, emailsLinked } = response.data;
+      const emails =
+        emailsLinked > 0
+          ? ` Attached ${emailsLinked} email${emailsLinked === 1 ? "" : "s"} as context.`
+          : "";
       setNotice(
         imported === 0 && updated === 0
           ? "No upcoming events found in the next two weeks."
           : `Imported ${imported} and refreshed ${updated} meeting${
               imported + updated === 1 ? "" : "s"
-            }.`,
+            }.${emails}`,
       );
       await load();
       onSynced?.();
@@ -170,6 +174,13 @@ export function CalendarConnectionCard({
                     "Calendar syncing is unavailable on this deployment."}
               </p>
             )}
+            {connection ? (
+              <p className="mt-1 text-sm leading-6 text-ink/55">
+                {connection.gmailEnabled
+                  ? "Email context is on — recent mail with each meeting's attendees is attached to its brief."
+                  : "Email context is off. Reconnect and tick the Gmail permission to give briefs the threads behind each meeting."}
+              </p>
+            ) : null}
             {connection?.lastSyncError ? (
               <p className="mt-1.5 text-sm text-coral">
                 Last sync failed: {connection.lastSyncError}

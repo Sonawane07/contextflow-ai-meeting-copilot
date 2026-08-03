@@ -480,19 +480,22 @@ Known limitation: the schedule uses a single UTC day window. Delivering each bri
 
 ## Google Calendar
 
-Read-only import of upcoming events as meetings. ContextFlow never writes to a calendar — the only scope requested is `calendar.readonly`, plus `userinfo.email` so the UI can name the connected account.
+Read-only import of upcoming events as meetings, plus the recent email behind each one. ContextFlow never writes to a calendar or a mailbox — the scopes requested are `calendar.readonly` and `gmail.readonly`, plus `userinfo.email` so the UI can name the connected account.
+
+**Why email matters here:** a calendar event is a title, a time, and some names. A brief built from that alone can only restate the invite. The thread behind the meeting is the part a person would actually have forgotten, so Gmail is what makes a brief worth reading.
 
 ### Setup
 
-1. Create a project at [console.cloud.google.com](https://console.cloud.google.com), then enable the **Google Calendar API**.
+1. Create a project at [console.cloud.google.com](https://console.cloud.google.com), then enable both the **Google Calendar API** and the **Gmail API** under *APIs & Services → Library*.
 2. Configure the OAuth consent screen as **External**, leave the publishing status on **Testing**, and add your own Google account under **Test users**.
-3. Create an **OAuth client ID** of type *Web application* and register the redirect URI verbatim — Google matches it exactly:
+3. Under *Data Access*, add both scopes: `.../auth/calendar.readonly` and `.../auth/gmail.readonly`.
+4. Create an **OAuth client ID** of type *Web application* and register the redirect URI verbatim — Google matches it exactly:
 
    ```
    http://localhost:3000/api/integrations/google/callback
    ```
 
-4. Generate a token-encryption key:
+5. Generate a token-encryption key:
 
    ```bash
    openssl rand -base64 32
@@ -507,7 +510,7 @@ Read-only import of upcoming events as meetings. ContextFlow never writes to a c
    TOKEN_ENCRYPTION_KEY=<the generated key>
    ```
 
-5. Restart, sign in, and use **Connect calendar** on the dashboard.
+6. Restart, sign in, and use **Connect calendar** on the dashboard. **Tick every permission** — Google lists sensitive scopes as individually declinable checkboxes, and skipping one yields a valid token that cannot do the thing you connected for.
 
 Google verification is **not** required for personal use. It applies to publishing an app publicly; an app left in Testing status may add up to 100 test users with no review.
 
@@ -523,6 +526,9 @@ Google verification is **not** required for personal use. It applies to publishi
 - **Synced rows carry `source = 'google_calendar'`.** Sync only ever touches those, so the synthetic starter workspace and any hand-made meetings are never overwritten.
 - **Sync never deletes.** An event cancelled in Google stays until removed deliberately, because a meeting may carry a brief and approved actions — records of decisions a person made.
 - **All-day entries are skipped.** Holidays, PTO, and reminders live there; briefing them is noise rather than signal.
+- **Email context uses Gmail's snippet, never the message body.** `format=metadata` returns headers plus a ~200-character preview, which is enough to remind someone what a thread was about. Pulling full bodies would put the contents of a mailbox into a database and then into a model prompt; the brief is no better for it.
+- **Relevance is by person, not by subject.** The email that matters before a meeting is rarely titled after it, so the search is scoped to correspondence with that meeting's attendees in the last 14 days, excluding chats, spam, and trash.
+- **Gmail is optional and degrades gracefully.** A connection without it still syncs calendars; the UI says email context is off and offers a reconnect. A Gmail failure never fails a calendar sync that otherwise succeeded.
 - **Disconnecting revokes at Google, then deletes locally** — and deletes even when revocation fails, since an already-expired token returns an error and refusing would strand the user with a connection they cannot remove.
 - **Imported meetings survive a disconnect**, for the same reason sync never deletes.
 
@@ -654,7 +660,7 @@ Approval in this MVP means **permission recorded**, not **side effect executed**
 
 ## Testing strategy
 
-The suite contains 90 test cases across fifteen test files:
+The suite contains 109 test cases across seventeen test files:
 
 1. meeting brief Zod validation, including an invalid unsafe action type;
 2. deterministic mock AI generation;

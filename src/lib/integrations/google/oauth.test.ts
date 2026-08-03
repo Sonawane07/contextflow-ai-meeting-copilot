@@ -65,16 +65,29 @@ describe("buildAuthorizationUrl", () => {
     expect(build().searchParams.get("state")).toBe("state-token");
   });
 
-  it("requests read-only calendar access only", () => {
+  it("requests calendar and mail, both read-only", () => {
     const scopes = (build().searchParams.get("scope") ?? "").split(" ");
     expect(scopes).toContain(
       "https://www.googleapis.com/auth/calendar.readonly",
     );
-    // Nothing that could modify a calendar or read mail.
-    expect(scopes.some((scope) => scope.includes("gmail"))).toBe(false);
-    expect(
-      scopes.some((s) => s.endsWith("/calendar") || s.endsWith("/calendar.events")),
-    ).toBe(false);
+    expect(scopes).toContain("https://www.googleapis.com/auth/gmail.readonly");
+  });
+
+  it("never requests a scope that could modify a calendar or a mailbox", () => {
+    // The read-only variants end in `.readonly`; the bare and `.events` /
+    // `.send` / `.modify` forms all grant writes.
+    const scopes = (build().searchParams.get("scope") ?? "").split(" ");
+    const writeScopes = [
+      "https://www.googleapis.com/auth/calendar",
+      "https://www.googleapis.com/auth/calendar.events",
+      "https://www.googleapis.com/auth/gmail.modify",
+      "https://www.googleapis.com/auth/gmail.send",
+      "https://www.googleapis.com/auth/gmail.compose",
+      "https://mail.google.com/",
+    ];
+    for (const scope of writeScopes) {
+      expect(scopes).not.toContain(scope);
+    }
   });
 
   it("never puts the client secret in a browser-visible URL", () => {

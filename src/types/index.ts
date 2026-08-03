@@ -92,12 +92,16 @@ export interface CalendarConnectionSummary {
   lastSyncedAt?: string;
   lastSyncError?: string;
   scope: string;
+  /** True when gmail.readonly was granted, so briefs get email context. */
+  gmailEnabled: boolean;
 }
 
 export interface CalendarSyncResult {
   imported: number;
   updated: number;
   skipped: number;
+  /** Email context items attached; 0 when the Gmail scope was not granted. */
+  emailsLinked: number;
   syncedAt: string;
 }
 

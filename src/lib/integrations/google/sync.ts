@@ -10,6 +10,13 @@ import {
   getValidAccessToken,
   recordSyncResult,
 } from "@/lib/integrations/google/connection-store";
+import { hasGmailScope } from "@/lib/integrations/google/config";
+import {
+  EMAIL_CONTEXT_KIND,
+  buildAttendeeQuery,
+  fetchMeetingEmails,
+  toEmailContext,
+} from "@/lib/integrations/google/gmail";
 import { RepositoryError } from "@/lib/supabase/repositories";
 import type { ContextFlowSupabaseClient } from "@/lib/supabase/server";
 import type { CalendarSyncResult } from "@/types";
@@ -68,7 +75,13 @@ export async function syncCalendar(
   const skipped = 0;
   if (drafts.length === 0) {
     await recordSyncResult(client, userId, { syncedAt: now });
-    return { imported: 0, updated: 0, skipped, syncedAt: now.toISOString() };
+    return {
+      imported: 0,
+      updated: 0,
+      skipped,
+      emailsLinked: 0,
+      syncedAt: now.toISOString(),
+    };
   }
 
   // Which of these events are already known, so the result can distinguish a
@@ -109,12 +122,95 @@ export async function syncCalendar(
   }
 
   const updated = drafts.filter((draft) => known.has(draft.externalId)).length;
+
+  // Email context is a bonus, not a precondition. A Gmail failure — most often
+  // the scope simply not being granted — must not fail a calendar sync that
+  // otherwise succeeded.
+  let emailsLinked = 0;
+  try {
+    emailsLinked = await syncEmailContext(client, userId, accessToken, now);
+  } catch {
+    emailsLinked = 0;
+  }
+
   await recordSyncResult(client, userId, { syncedAt: now });
 
   return {
     imported: drafts.length - updated,
     updated,
     skipped,
+    emailsLinked,
     syncedAt: now.toISOString(),
   };
+}
+
+/**
+ * Attaches recent correspondence with each meeting's attendees.
+ *
+ * This is what makes a brief worth reading: a calendar event alone is a title
+ * and a time, so a brief built from it can only restate the invite. The email
+ * thread behind it is the part a person would actually have forgotten.
+ *
+ * Returns the number of context items written; zero when Gmail was not granted.
+ */
+async function syncEmailContext(
+  client: ContextFlowSupabaseClient,
+  userId: string,
+  accessToken: string,
+  now: Date,
+): Promise<number> {
+  const { data: connection } = await client
+    .from("calendar_connections")
+    .select("scope, account_email")
+    .eq("user_id", userId)
+    .eq("provider", "google")
+    .maybeSingle();
+
+  if (!connection || !hasGmailScope(connection.scope)) return 0;
+
+  const { data: meetings, error } = await client
+    .from("meetings")
+    .select("id, attendees")
+    .eq("user_id", userId)
+    .eq("source", "google_calendar")
+    .gte("starts_at", now.toISOString());
+
+  if (error || !meetings?.length) return 0;
+
+  const rows: Record<string, unknown>[] = [];
+
+  for (const meeting of meetings) {
+    const query = buildAttendeeQuery(
+      meeting.attendees ?? [],
+      connection.account_email,
+    );
+    // No attendees other than the user: nothing to correlate against, and a
+    // broader search would pull in unrelated mail.
+    if (!query) continue;
+
+    const messages = await fetchMeetingEmails(accessToken, query);
+    for (const message of messages) {
+      const draft = toEmailContext(message);
+      if (!draft) continue;
+      rows.push({
+        user_id: userId,
+        meeting_id: meeting.id,
+        source_key: draft.sourceKey,
+        kind: EMAIL_CONTEXT_KIND,
+        title: draft.title,
+        body: draft.body,
+        source_label: draft.sourceLabel,
+        occurred_at: draft.occurredAt,
+      });
+    }
+  }
+
+  if (rows.length === 0) return 0;
+
+  const { error: writeError } = await client
+    .from("context_items")
+    .upsert(rows as never, { onConflict: "meeting_id,source_key" });
+
+  if (writeError) return 0;
+  return rows.length;
 }

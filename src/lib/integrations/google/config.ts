@@ -9,6 +9,10 @@
  */
 export const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/calendar.readonly",
+  // Restricted scope. Google requires a security assessment to publish an app
+  // that requests it, but an app in Testing status may grant it to its test
+  // users with no review.
+  "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/userinfo.email",
 ] as const;
 
@@ -24,8 +28,26 @@ export const GOOGLE_SCOPES = [
 export const REQUIRED_GOOGLE_SCOPE =
   "https://www.googleapis.com/auth/calendar.readonly";
 
+/**
+ * Optional. Email context makes briefs substantially better, but a connection
+ * without it is still useful, so a declined Gmail checkbox degrades the
+ * feature rather than failing the connection.
+ */
+export const GMAIL_GOOGLE_SCOPE =
+  "https://www.googleapis.com/auth/gmail.readonly";
+
+function granted(grantedScope: string, scope: string): boolean {
+  // Exact match per entry: `calendar` and `calendar.events` are neither what
+  // was requested nor substitutes, and a prefix test would accept them.
+  return grantedScope.split(/\s+/).includes(scope);
+}
+
 export function hasCalendarScope(grantedScope: string): boolean {
-  return grantedScope.split(/\s+/).includes(REQUIRED_GOOGLE_SCOPE);
+  return granted(grantedScope, REQUIRED_GOOGLE_SCOPE);
+}
+
+export function hasGmailScope(grantedScope: string): boolean {
+  return granted(grantedScope, GMAIL_GOOGLE_SCOPE);
 }
 
 export const GOOGLE_AUTH_ENDPOINT =

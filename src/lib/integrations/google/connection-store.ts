@@ -1,6 +1,7 @@
 import "server-only";
 
 import { decryptToken, encryptToken } from "@/lib/crypto/tokens";
+import { hasGmailScope } from "@/lib/integrations/google/config";
 import {
   GoogleOAuthError,
   refreshAccessToken,
@@ -38,6 +39,9 @@ export function toConnectionSummary(row: {
     lastSyncedAt: row.last_synced_at ?? undefined,
     lastSyncError: row.last_sync_error ?? undefined,
     scope: row.scope,
+    // Surfaced so a declined Gmail checkbox is visible in the UI rather than
+    // showing up later as briefs that mysteriously have no email context.
+    gmailEnabled: hasGmailScope(row.scope),
   };
 }
 
