@@ -33,3 +33,6 @@ next-env.d.ts
 # Every env file is local-only except the committed template.
 .env*
 !.env.example
+
+# One-off helper: concatenation of supabase/migrations for pasting into the dashboard.
+apply-to-hosted.sql

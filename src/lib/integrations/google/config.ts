@@ -12,6 +12,22 @@ export const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/userinfo.email",
 ] as const;
 
+/**
+ * The scope the feature cannot work without.
+ *
+ * Google presents sensitive scopes as individually declinable checkboxes, so a
+ * user can complete consent having granted only `openid`/`userinfo.email`. That
+ * yields a perfectly valid token which then fails every Calendar call with a
+ * 403 — checking the granted scope up front turns that into an actionable
+ * message at connect time.
+ */
+export const REQUIRED_GOOGLE_SCOPE =
+  "https://www.googleapis.com/auth/calendar.readonly";
+
+export function hasCalendarScope(grantedScope: string): boolean {
+  return grantedScope.split(/\s+/).includes(REQUIRED_GOOGLE_SCOPE);
+}
+
 export const GOOGLE_AUTH_ENDPOINT =
   "https://accounts.google.com/o/oauth2/v2/auth";
 export const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";

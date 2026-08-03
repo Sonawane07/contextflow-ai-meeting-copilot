@@ -25,6 +25,8 @@ const CALLBACK_MESSAGES: Record<string, string> = {
   "connected-no-refresh":
     "Calendar connected, but Google did not return a refresh token. Disconnect and reconnect if syncing stops working.",
   denied: "Consent was cancelled, so no calendar was connected.",
+  "scope-missing":
+    "Calendar access was not granted, so nothing was connected. Reconnect and tick the calendar permission on Google's consent screen — it is a separate checkbox from your email address.",
   "state-mismatch":
     "That sign-in response could not be verified. Please start the connection again.",
   "invalid-response": "Google's response was incomplete. Please try again.",

@@ -34,6 +34,33 @@ export async function POST(request: Request) {
   });
 
   if (error || !data.user) {
+    // Name the failures a person can act on. `user_already_exists` is
+    // deliberately *not* among them — saying so would let anyone test which
+    // addresses hold accounts.
+    if (error?.code === "email_address_invalid") {
+      return failure(
+        400,
+        "EMAIL_REJECTED",
+        "That email address was rejected as invalid.",
+      );
+    }
+    if (error?.code === "weak_password") {
+      return failure(
+        400,
+        "WEAK_PASSWORD",
+        "That password was rejected. Try a longer or less common one.",
+      );
+    }
+    if (error?.status === 429) {
+      // Supabase sends a confirmation email on sign-up, and the built-in SMTP
+      // allowance is small. Reported as a rate limit rather than a bad email,
+      // which is what the generic message used to imply.
+      return failure(
+        429,
+        "SIGN_UP_RATE_LIMITED",
+        "Too many sign-up attempts. Wait a few minutes, or disable email confirmation in Supabase for a single-user deployment.",
+      );
+    }
     return failure(
       400,
       "SIGN_UP_FAILED",

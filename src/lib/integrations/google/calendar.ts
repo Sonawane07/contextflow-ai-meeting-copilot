@@ -100,6 +100,18 @@ export function toMeetingDraft(event: GoogleCalendarEvent): MeetingDraft {
   };
 }
 
+/** Google's machine-readable reason code, when the body carries one. */
+async function readErrorReason(response: Response): Promise<string | null> {
+  try {
+    const body = (await response.json()) as {
+      error?: { errors?: { reason?: string }[] };
+    };
+    return body.error?.errors?.[0]?.reason ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Reads upcoming events from the user's primary calendar.
  *
@@ -123,6 +135,22 @@ export async function fetchUpcomingEvents(
   });
 
   if (!response.ok) {
+    // Google returns a reason code alongside the status; a bare number sends
+    // the reader looking in the wrong place. The two 403s below have entirely
+    // different fixes.
+    const reason = await readErrorReason(response);
+    if (response.status === 403 && reason === "insufficientPermissions") {
+      throw new GoogleCalendarError(
+        "Calendar access was not granted. Reconnect and tick the calendar permission on Google's consent screen.",
+        403,
+      );
+    }
+    if (response.status === 403) {
+      throw new GoogleCalendarError(
+        "Google denied the calendar request. Check that the Google Calendar API is enabled for the project.",
+        403,
+      );
+    }
     throw new GoogleCalendarError(
       `Google Calendar returned ${response.status}.`,
       response.status,

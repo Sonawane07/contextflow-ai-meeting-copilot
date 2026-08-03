@@ -2,7 +2,10 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth/session";
 import { safeEqual } from "@/lib/crypto/tokens";
-import { getGoogleRedirectUri } from "@/lib/integrations/google/config";
+import {
+  getGoogleRedirectUri,
+  hasCalendarScope,
+} from "@/lib/integrations/google/config";
 import {
   exchangeCodeForTokens,
   fetchAccountEmail,
@@ -80,6 +83,13 @@ export async function GET(request: Request) {
       redirectUri: getGoogleRedirectUri(url.origin),
       codeVerifier: verifier,
     });
+
+    // Consent can succeed while the calendar checkbox is left unticked. The
+    // resulting token is valid but useless, so it is rejected here rather than
+    // stored to fail later with an opaque 403.
+    if (!hasCalendarScope(tokens.scope)) {
+      return backToDashboard(request, "scope-missing");
+    }
 
     const accountEmail = await fetchAccountEmail(tokens.accessToken);
     const supabase = await createSupabaseServerClient();
