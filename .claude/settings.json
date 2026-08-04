@@ -1,12 +1,24 @@
 {
   "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/check-db-invariants.mjs",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "npm run typecheck && npm test",
-            "timeout": 120
+            "command": "node .claude/hooks/verify.mjs",
+            "timeout": 180
           }
         ]
       }

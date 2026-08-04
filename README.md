@@ -241,7 +241,12 @@ flowchart TD
 .
 ├── .claude/
 │   ├── agents/code-reviewer.md
-│   ├── skills/create-api-route/SKILL.md
+│   ├── hooks/
+│   │   ├── check-db-invariants.mjs  # grants + type-alias guard
+│   │   └── verify.mjs               # scoped stop-time verification
+│   ├── skills/
+│   │   ├── add-migration/SKILL.md
+│   │   └── create-api-route/SKILL.md
 │   └── settings.json
 ├── .github/workflows/ci.yml
 ├── src/
@@ -655,11 +660,13 @@ The repository includes a minimal, inspectable Claude Code setup:
 
 1. `CLAUDE.md` supplies project boundaries and quality commands.
 2. `.claude/skills/create-api-route/SKILL.md` provides a repeatable API-route workflow.
-3. `.claude/settings.json` runs non-mutating verification at session stop.
-4. `.claude/agents/code-reviewer.md` defines a read-only safety-focused review role.
-5. `.mcp.json.example` shows how to connect the local read-only MCP server.
+3. `.claude/skills/add-migration/SKILL.md` covers the multi-file migration sequence.
+4. `.claude/hooks/check-db-invariants.mjs` blocks two database mistakes the compiler cannot see.
+5. `.claude/hooks/verify.mjs` runs non-mutating verification at session stop.
+6. `.claude/agents/code-reviewer.md` defines a read-only safety-focused review role.
+7. `.mcp.json.example` shows how to connect the local read-only MCP server.
 
-The configuration is intentionally small enough for a reviewer to understand without hidden automation.
+The configuration is intentionally small enough for a reviewer to understand without hidden automation. Everything in it exists because something in this repository went wrong without it; the reasoning is given below rather than assumed.
 
 ## `CLAUDE.md` explanation
 
@@ -669,15 +676,26 @@ The configuration is intentionally small enough for a reviewer to understand wit
 
 The `create-api-route` skill directs Claude Code to inspect neighboring route patterns, validate inputs with Zod, use typed errors, preserve server-only secrets and the approval boundary, add tests, and update public documentation.
 
+The `add-migration` skill covers the sequence a migration actually requires: SQL with grants alongside policies, hand-authored row types updated in the same change, repository queries scoped twice, verification against a real database, and the four README sections that describe the schema. It exists because doing only the first of those produced `003_role_grants.sql`.
+
 ## Hook explanation
 
-`.claude/settings.json` defines a safe `Stop` hook:
+Two hooks, both read-only with respect to source files.
 
-```bash
-npm run typecheck && npm test
-```
+**`PostToolUse` — `check-db-invariants.mjs`.** Runs on every `Write` and `Edit`, inspects only the file just written, and looks for two mistakes that neither the compiler nor the test suite can see:
 
-It verifies work and does not modify source files. Lint and build remain explicit completion commands because they are slower and easier to inspect when invoked directly.
+| Check | Why it is invisible to `typecheck` and `test` |
+| --- | --- |
+| A table with row-level security but no `grant` in any migration | Grants and policies are separate systems. A policy-only schema reads as complete and fails at runtime with `permission denied` before RLS is consulted. This is exactly what `003_role_grants.sql` had to repair. |
+| An `interface` in `database.types.ts` | postgrest-js constrains rows to `Record<string, unknown>`, and only `type` aliases receive an implicit index signature. An interface compiles here and collapses every query result to `never` somewhere else entirely. |
+
+The grant check reads the whole migration directory rather than one file, because a later migration may legitimately supply the grant for an earlier table — which is what `003` does for `001` and `002`.
+
+**`Stop` — `verify.mjs`.** Runs `npm run typecheck` and `npm test`, but only when the change actually touched code, and additionally reports a migration that changes a table's shape without updating `database.types.ts` beside it. A migration that adds only grants or policies is exempt, since it cannot affect a row type.
+
+Lint and build remain explicit completion commands because they are slower and easier to inspect when invoked directly.
+
+Both hooks are ordinary Node scripts with no dependencies, readable in one sitting, and they only ever read and report — neither edits a file.
 
 ## Reviewer subagent explanation
 
