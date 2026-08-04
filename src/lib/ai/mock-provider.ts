@@ -103,13 +103,31 @@ const meetingResponses = {
   },
 } satisfies Record<string, unknown>;
 
+type ResponseKey = keyof typeof meetingResponses;
+
+/**
+ * Persistent meetings carry a database UUID, not the demo slug, so the id
+ * lookup alone would return the same brief for every meeting. Titles are stable
+ * across both paths and are the fallback.
+ */
+const responseKeyByTitle: Record<string, ResponseKey> = {
+  "Product weekly: activation": "product-weekly",
+  "Launch readiness review": "launch-readiness",
+  "Northstar discovery debrief": "customer-discovery",
+};
+
 export class MockAIProvider implements AIProvider {
   readonly name = "mock" as const;
 
+  private resolveKey(meeting: Meeting): ResponseKey {
+    if (meeting.id in meetingResponses) {
+      return meeting.id as ResponseKey;
+    }
+    return responseKeyByTitle[meeting.title] ?? "product-weekly";
+  }
+
   async generateMeetingBrief(meeting: Meeting) {
-    const response =
-      meetingResponses[meeting.id as keyof typeof meetingResponses] ??
-      meetingResponses["product-weekly"];
+    const response = meetingResponses[this.resolveKey(meeting)];
     return meetingBriefOutputSchema.parse(structuredClone(response));
   }
 }

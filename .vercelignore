@@ -1,0 +1,13 @@
+# Local environment must never reach a build. NEXT_PUBLIC_* values are inlined
+# at build time, so a leaked .env.local would bake a localhost Supabase URL and
+# DEMO_MODE=false into the deployed bundle.
+.env
+.env.local
+.env.*.local
+
+# Local Supabase stack: CLI config and container runtime files.
+supabase/.temp
+supabase/.branches
+
+# Personal documents kept alongside the repo.
+*.pdf

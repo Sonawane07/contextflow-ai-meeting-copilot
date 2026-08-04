@@ -7,6 +7,12 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      // `server-only` throws on import outside a React Server Component.
+      // Vitest runs modules directly, so it resolves to the package's own
+      // no-op build the way the react-server condition would.
+      "server-only": fileURLToPath(
+        new URL("./node_modules/server-only/empty.js", import.meta.url),
+      ),
     },
   },
   test: {

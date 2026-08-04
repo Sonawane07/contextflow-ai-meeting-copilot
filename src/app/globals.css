@@ -103,6 +103,24 @@ button:disabled {
   background: rgba(255, 255, 255, 0.6);
 }
 
+.field {
+  display: block;
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid rgba(23, 34, 29, 0.14);
+  border-radius: 11px;
+  background: white;
+  padding: 0.6rem 0.85rem;
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  color: #17221d;
+}
+
+.field:focus-visible {
+  outline: 3px solid rgba(237, 115, 90, 0.45);
+  outline-offset: 1px;
+}
+
 .landing-grid {
   background-image:
     linear-gradient(rgba(23, 34, 29, 0.055) 1px, transparent 1px),
