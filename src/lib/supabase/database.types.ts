@@ -43,6 +43,34 @@ type MeetingRow = {
   updated_at: string;
 };
 
+export type TrackedEmailCategoryColumn =
+  | "interview_invite"
+  | "assessment"
+  | "offer"
+  | "rejection"
+  | "reply_needed"
+  | "acknowledgement"
+  | "other";
+
+type TrackedEmailRow = {
+  id: string;
+  user_id: string;
+  message_id: string;
+  thread_id: string;
+  subject: string;
+  from_label: string;
+  snippet: string;
+  received_at: string;
+  is_unread: boolean;
+  category: TrackedEmailCategoryColumn;
+  needs_reply: boolean;
+  reason: string;
+  deadline_at: string | null;
+  dismissed_at: string | null;
+  first_seen_at: string;
+  last_scanned_at: string;
+};
+
 type CalendarConnectionRow = {
   id: string;
   user_id: string;
@@ -176,6 +204,10 @@ export type Database = {
       audit_logs: Table<
         AuditLogRow,
         "user_id" | "meeting_id" | "action_title" | "status" | "actor_label"
+      >;
+      tracked_emails: Table<
+        TrackedEmailRow,
+        "user_id" | "message_id" | "thread_id" | "received_at"
       >;
       calendar_connections: Table<
         CalendarConnectionRow,

@@ -36,3 +36,4 @@ next-env.d.ts
 
 # One-off helper: concatenation of supabase/migrations for pasting into the dashboard.
 apply-to-hosted.sql
+apply-005.sql

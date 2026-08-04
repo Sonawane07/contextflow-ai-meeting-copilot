@@ -105,6 +105,39 @@ export interface CalendarSyncResult {
   syncedAt: string;
 }
 
+export type TrackedEmailCategory =
+  | "interview_invite"
+  | "assessment"
+  | "offer"
+  | "rejection"
+  | "reply_needed"
+  | "acknowledgement"
+  | "other";
+
+/** A job-search email still awaiting the user. Read-only against Gmail. */
+export interface TrackedEmail {
+  id: string;
+  messageId: string;
+  threadId: string;
+  subject: string;
+  from: string;
+  snippet: string;
+  receivedAt: string;
+  isUnread: boolean;
+  category: TrackedEmailCategory;
+  needsReply: boolean;
+  reason: string;
+  deadlineAt?: string;
+  dismissedAt?: string;
+}
+
+export interface JobInboxScanSummary {
+  scanned: number;
+  tracked: number;
+  needingReply: number;
+  scannedAt: string;
+}
+
 export interface ApiSuccess<T> {
   data: T;
   meta?: {

@@ -20,11 +20,21 @@ interface GmailMessageRef {
   id?: string;
 }
 
-interface GmailMessage {
+export interface GmailMessage {
   id?: string;
+  threadId?: string;
+  labelIds?: string[];
   snippet?: string;
   internalDate?: string;
   payload?: { headers?: { name?: string; value?: string }[] };
+}
+
+export function messageHeader(message: GmailMessage, name: string): string {
+  return header(message, name);
+}
+
+export function isUnread(message: GmailMessage): boolean {
+  return (message.labelIds ?? []).includes("UNREAD");
 }
 
 function header(message: GmailMessage, name: string): string {
@@ -92,6 +102,14 @@ async function gmailFetch(
  * then into a model prompt. Less data, less exposure, and the brief is no
  * worse for it.
  */
+export async function searchMessages(
+  accessToken: string,
+  query: string,
+  maxResults: number,
+): Promise<GmailMessage[]> {
+  return fetchMeetingEmails(accessToken, query, maxResults);
+}
+
 export async function fetchMeetingEmails(
   accessToken: string,
   query: string,
