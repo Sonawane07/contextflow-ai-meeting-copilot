@@ -28,7 +28,7 @@ ContextFlow is a focused, human-in-the-loop meeting copilot that turns relevant 
 | --- | --- |
 | **Product focus** | Prepare for one selected meeting and review its proposed follow-ups |
 | **Safety boundary** | AI proposes; the user approves or rejects; the MVP never executes |
-| **Working surface** | Six responsive pages and thirteen typed API routes |
+| **Working surface** | Six responsive pages and seventeen typed API routes |
 | **Default data path** | Synthetic seed data → in-memory repositories → deterministic mock provider |
 | **Persistent path** | Supabase Auth → RLS-scoped PostgreSQL repositories behind the same interfaces |
 | **Optional AI path** | Server-only Anthropic provider with Zod-validated JSON output |
@@ -55,9 +55,9 @@ Setting `DEMO_MODE=false` with a configured Supabase project switches the same r
 
 The project deliberately separates:
 
-- **Implemented:** six responsive pages, thirteen validated API routes, read-only Google Calendar import, email/password authentication, persistent Supabase repositories behind the same interfaces as the demo ones, deterministic mock AI, optional server-only Anthropic provider, action approvals/rejections, audit history, tests, and CI.
+- **Implemented:** six responsive pages, seventeen validated API routes, read-only Google Calendar import, read-only Gmail context and job-application inbox triage, email/password authentication, persistent Supabase repositories behind the same interfaces as the demo ones, deterministic mock AI, optional server-only Anthropic provider, action approvals/rejections, audit history, tests, and CI.
 - **Illustrative production design:** pgvector semantic retrieval and a read-only MCP server.
-- **Planned:** Gmail and Slack connectors, semantic retrieval, and action execution adapters.
+- **Planned:** Slack and task-system connectors, semantic retrieval, and action execution adapters.
 
 No production usage, performance metrics, or live third-party integrations are claimed.
 
@@ -82,6 +82,7 @@ ContextFlow tests a narrower product thesis:
 - Supports an optional Anthropic provider on the server.
 - Lets the user approve or reject proposed actions.
 - Records each decision with action, status, meeting, actor, and timestamp.
+- Surfaces job-search email still waiting on a reply, classified and dismissible by hand (persistent mode with Gmail connected).
 - Handles loading, empty, and error states.
 - Provides a responsive, accessible interface with reduced-motion support.
 
@@ -111,6 +112,7 @@ All approved actions remain simulated. The demo does not send email, create task
 - Action center with pending, approved, and rejected views.
 - Audit log with decision metadata.
 - Read-only Google Calendar connection: import upcoming events as meetings, re-sync on demand, disconnect and revoke.
+- Job-application inbox on the dashboard: scans recent job-search mail, sorts what still owes a reply to the top, explains every classification in one line, and lets the user mark an item handled.
 
 ### Engineering
 
@@ -120,7 +122,8 @@ All approved actions remain simulated. The demo does not send email, create task
 - Supabase Auth with server-side session verification, session refresh in `src/proxy.ts`, and row-level security policies scoping every table to `auth.uid()`.
 - Compare-and-set approval writes, so two concurrent decisions cannot both succeed.
 - Google OAuth with PKCE, CSRF state in httpOnly cookies, and AES-256-GCM encryption of access and refresh tokens before they reach the database.
-- Zod validation for credentials, action mutations, and AI output.
+- A heuristic classification floor under every model call, so inbox triage degrades to something useful rather than nothing when Anthropic is unconfigured or failing.
+- Zod validation for credentials, action mutations, inbox triage, and AI output.
 - Typed JSON success/error envelopes.
 - Server-only Anthropic SDK access with safe validation failures.
 - Deterministic demo repositories backed by one in-memory store.
@@ -132,8 +135,8 @@ All approved actions remain simulated. The demo does not send email, create task
 The following are intentionally not implemented:
 
 - organization membership and role-aware approval;
-- Gmail, Slack, or task-system OAuth;
-- automatic background ingestion;
+- Slack or task-system OAuth;
+- automatic background ingestion; the mailbox scan is user-triggered;
 - production embedding generation and semantic retrieval;
 - actual email, task, or scheduling execution;
 - multi-tenant observability, rate limiting, or billing;
@@ -176,7 +179,18 @@ flowchart LR
     MR -. production adapter .-> DB
     AR -. production adapter .-> DB
     IQ -. scheduled example .-> DB
+
+    R --> G[Google integration]
+    G -->|calendar.readonly| GC[Calendar import]
+    G -->|gmail.readonly| GM[Snippets only]
+    GM --> T[Job-inbox triage]
+    T --> H[Heuristic floor]
+    T -. optional refinement .-> A
+    GC --> DB
+    T --> DB
 ```
+
+Read-only throughout: the Google paths import and classify, and never write back to a calendar or a mailbox.
 
 ### Request path
 
@@ -212,7 +226,8 @@ flowchart TD
 | Language | TypeScript 6, strict mode | Domain contracts and compile-time checks |
 | Styling | Tailwind CSS 4 | Responsive design system and UI utilities |
 | Validation | Zod 4 | API mutation and AI-output validation |
-| AI | Mock provider; optional Anthropic SDK | Credential-free demo and opt-in model calls |
+| AI | Mock provider; optional Anthropic SDK | Credential-free demo, opt-in brief generation, and inbox triage |
+| Integrations | Google OAuth 2.0 with PKCE, Calendar and Gmail read-only APIs | Meeting import and job-search mail context |
 | Test | Vitest, Testing Library, jsdom | Schema, provider, repository, auth, API, and component tests |
 | Persistence | Supabase (PostgreSQL), Supabase Auth, RLS | Accounts, per-user data, and policy-enforced scoping |
 | Background jobs | Inngest | Fan-out scheduled brief generation with retries and idempotency |
@@ -233,6 +248,8 @@ flowchart TD
 │   ├── app/
 │   │   ├── api/
 │   │   │   ├── auth/            # sign-in, sign-up, sign-out
+│   │   │   ├── inbox/           # job-application inbox: list, scan, triage
+│   │   │   ├── integrations/    # Google OAuth, sync, disconnect
 │   │   │   ├── inngest/         # scheduled workflow endpoint
 │   │   │   └── ...
 │   │   ├── actions/
@@ -247,22 +264,29 @@ flowchart TD
 │   │   ├── auth/
 │   │   ├── briefs/
 │   │   ├── dashboard/
+│   │   ├── inbox/
+│   │   ├── integrations/
 │   │   └── meetings/
 │   ├── lib/
-│   │   ├── ai/
-│   │   ├── auth/               # session resolution, redirect safety
+│   │   ├── ai/                  # provider interface, mock, Anthropic, triage
+│   │   ├── auth/                # session resolution, redirect safety
 │   │   ├── client/
-│   │   ├── demo/               # in-memory repositories
-│   │   ├── inngest/            # client, scheduled functions
-│   │   ├── supabase/           # clients, db types, persistent repositories
+│   │   ├── crypto/              # AES-256-GCM OAuth token encryption
+│   │   ├── demo/                # in-memory repositories
+│   │   ├── inngest/             # client, scheduled functions
+│   │   ├── integrations/google/ # OAuth, calendar, Gmail, job inbox
+│   │   ├── supabase/            # clients, db types, persistent repositories
 │   │   ├── validation/
-│   │   └── request-context.ts  # chooses identity + repository set
-│   ├── proxy.ts                # session refresh and page gating
+│   │   └── request-context.ts   # chooses identity + repository set
+│   ├── proxy.ts                 # session refresh and page gating
 │   ├── test/
 │   └── types/
 ├── supabase/migrations/
 │   ├── 001_initial_schema.sql
-│   └── 002_workspace_alignment.sql
+│   ├── 002_workspace_alignment.sql
+│   ├── 003_role_grants.sql
+│   ├── 004_calendar_integration.sql
+│   └── 005_job_application_inbox.sql
 ├── tools/contextflow-mcp/
 ├── AGENTS.md
 ├── CLAUDE.md
@@ -316,8 +340,14 @@ Open `http://localhost:3000`.
 | `SUPABASE_SERVICE_ROLE_KEY` | Scheduled jobs, server only | Bypasses RLS; used only by Inngest functions, never on a request path |
 | `INNGEST_EVENT_KEY` | Scheduled jobs | Publishing events to Inngest |
 | `INNGEST_SIGNING_KEY` | Scheduled jobs | Verifying inbound Inngest request signatures |
+| `GOOGLE_CLIENT_ID` | Google only | OAuth client for Calendar and Gmail |
+| `GOOGLE_CLIENT_SECRET` | Google only | Server-only OAuth client secret |
+| `GOOGLE_REDIRECT_URI` | Google only | Must match the registered URI verbatim |
+| `TOKEN_ENCRYPTION_KEY` | Google only | AES-256-GCM key; required before any OAuth token can be stored |
 
 `.env.example` contains names only. Never commit real values.
+
+Rotating `TOKEN_ENCRYPTION_KEY` makes existing connections undecryptable; users must reconnect.
 
 ## Demo mode instructions
 
@@ -340,7 +370,7 @@ Restarting the server resets all decisions. This is expected demo behavior.
 
 Persistent mode swaps the in-memory repositories for authenticated Supabase ones. The API contracts, UI, and approval boundary are unchanged.
 
-1. Create a Supabase project and apply both migrations in `supabase/migrations` in order.
+1. Create a Supabase project and apply every migration in `supabase/migrations` in numeric order.
 2. Add the project URL and anon key to `.env.local`, and set `DEMO_MODE=false`:
 
 ```dotenv
@@ -420,11 +450,15 @@ The provider's raw message is never forwarded — it can echo request content, w
 | `meeting_briefs` | The current generated brief for a meeting |
 | `proposed_actions` | AI proposals and their human decision |
 | `audit_logs` | Append-only record of approvals and rejections |
+| `calendar_connections` | One Google connection per user, with encrypted tokens |
+| `tracked_emails` | Job-search mail awaiting the user, with its classification and triage state |
 
 Every table includes `user_id`, enables row-level security, and carries policies restricting rows to `auth.uid()`.
 
 Design decisions worth reviewing:
 
+- **Grants and policies are two separate systems.** A `GRANT` decides whether a role may touch a table at all; an RLS policy decides which rows. Migrations 001 and 002 defined only the second, so every request failed with `permission denied` before RLS was ever consulted — invisible until the app ran against a real database, because a policy-only schema reads as complete. `003_role_grants.sql` grants per table to match what each policy set allows, and withholds `delete` on `proposed_actions` and both `update` and `delete` on `audit_logs`.
+- **The database refuses a pre-approved proposal.** The insert policy on `proposed_actions` pins new rows to `status = 'pending'`. The approval boundary is the product's core safety property, so it is enforced in the schema rather than trusted to every future code path.
 - **`source_key` natural keys.** The AI provider supplies its own action identifier, which is not a UUID. Rows keep a generated UUID primary key and upsert on `(meeting_id, source_key)`, so regenerating a brief re-syncs proposals without duplicating them.
 - **Decisions survive regeneration.** The upsert never writes `status` or `decided_at`, so re-running a brief cannot quietly reset an approval a human already made.
 - **Compare-and-set approvals.** `updateStatus` filters on `status = 'pending'`, so two concurrent decisions cannot both succeed; the second matches no row and the route returns 409. The route's own pending check is a friendly error message, not the safety property.
@@ -478,11 +512,13 @@ npx inngest-cli@latest dev -u http://localhost:3000/api/inngest
 
 Known limitation: the schedule uses a single UTC day window. Delivering each brief in the recipient's own morning needs a per-user time zone, which the schema does not yet store.
 
-## Google Calendar
+## Google Calendar and Gmail
 
 Read-only import of upcoming events as meetings, plus the recent email behind each one. ContextFlow never writes to a calendar or a mailbox — the scopes requested are `calendar.readonly` and `gmail.readonly`, plus `userinfo.email` so the UI can name the connected account.
 
 **Why email matters here:** a calendar event is a title, a time, and some names. A brief built from that alone can only restate the invite. The thread behind the meeting is the part a person would actually have forgotten, so Gmail is what makes a brief worth reading.
+
+The same read-only Gmail grant also powers the [job-application inbox](#job-application-inbox).
 
 ### Setup
 
@@ -540,6 +576,38 @@ Scheduled runs have no session cookie, so no `auth.uid()` exists for RLS policie
 
 The repositories therefore scope every query twice: RLS is the guarantee on request paths, and an explicit `user_id` filter in application code is what scopes the background path. Filtering in both places lets one repository implementation serve both callers rather than maintaining a parallel unscoped copy. The service-role client disables session persistence and must never be constructed on a request path.
 
+## Job-application inbox
+
+A job search fails quietly. Nobody misses an interview invite on purpose — it arrives among forty other things, gets read, and then scrolls away. The inbox panel on the dashboard exists to make that specific failure impossible: it surfaces job-search mail that is still waiting on the user, ordered by what they still owe a reply to.
+
+It appears in persistent mode once Google is connected with Gmail access, and it is **read-only with respect to the mailbox**. Nothing here sends, replies, forwards, or marks a message read. The only state ContextFlow owns is the triage.
+
+### How a scan works
+
+1. A Gmail search bounded to the last 30 days finds candidates, matching either a job-search subject term or one of the applicant tracking systems most companies send through (Greenhouse, Lever, Ashby, Workday, and others). Chats, spam, and trash are excluded.
+2. Each candidate gets a heuristic classification from its subject and snippet.
+3. One batched Anthropic call refines the whole set, returning a category, whether a reply is owed, a one-line reason, and any deadline the message itself named.
+4. Model output is merged over the heuristic baseline and upserted on `(user_id, message_id)`.
+
+Categories are `interview_invite`, `assessment`, `offer`, `rejection`, `reply_needed`, `acknowledgement`, and `other`.
+
+### Design decisions
+
+- **The heuristic is a floor, not a fallback path.** It runs on every scan whether or not a model is available, and the model refines its output rather than replacing it. An unconfigured or failing Anthropic key degrades the feature to something useful instead of to nothing — a scan never fails because triage was unavailable.
+- **A partial model response cannot drop emails.** Merging is per message id; anything the model omitted keeps its heuristic classification.
+- **Hallucinated ids are discarded.** A classification echoing an id that was never sent is dropped rather than becoming a row.
+- **Two stages, because one is not enough.** A Gmail query is cheap and does the coarse filtering, but keyword matching cannot tell an interview invite from a newsletter that happens to say "opportunity". The query is deliberately tuned for recall: a false positive is a row the classifier discards, while a false negative is the missed email this feature exists to prevent.
+- **Ordered by consequence.** A rejection that also mentions an interview is still a rejection, so the heuristic checks rejection wording before scheduling wording.
+- **`other` is the safe default.** Anything the classifier is unsure about lands there rather than masquerading as urgent, and a database check constraint refuses any category outside the set.
+- **Every row explains itself.** The stored `reason` means a wrong call is inspectable rather than mysterious.
+- **Dismissal is never inferred.** Reading an email is not the same as having handled it, and only the person knows the difference — so `dismissed_at` is set by an explicit action and re-scanning deliberately leaves it alone. A dismissal is not undone by the next scan.
+- **Snippets only, never message bodies.** The same boundary as meeting email context: subject, sender, and Gmail's ~200-character preview are all that is read or sent to a model. Pulling full bodies would put the contents of a mailbox into a database and then into a prompt.
+- **Email content is untrusted data.** The system prompt says so explicitly; a message containing something shaped like an instruction is classified, never acted on.
+- **Separate from `context_items` on purpose.** Meeting context belongs to a meeting and exists to inform a brief. These rows belong to nothing but the user's attention, and carry state that meeting context does not.
+- **The panel hides itself when empty.** An empty inbox card on every dashboard is furniture, not information.
+
+Scanning is user-triggered. There is no background mailbox ingestion.
+
 ## API route table
 
 All responses use either `{ "data": ... }` or `{ "error": { "code", "message", "details?" } }`.
@@ -562,6 +630,9 @@ Every data route resolves a session first and returns `401 NOT_AUTHENTICATED` wh
 | `GET` | `/api/integrations/google/callback` | Verifies state, exchanges the code, stores encrypted tokens | Redirects with a status code, never echoes provider errors |
 | `POST` | `/api/integrations/google/sync` | Imports upcoming events as meetings | 409 when the grant needs renewing |
 | `POST` | `/api/integrations/google/disconnect` | Revokes at Google and deletes the connection | Keeps imported meetings |
+| `GET` | `/api/inbox` | Lists job-search email awaiting the user, reply-owed first | Hides dismissed rows unless `?include=all` |
+| `POST` | `/api/inbox/scan` | Re-scans Gmail and re-classifies candidates | 400 when Gmail is not granted; 409 when the grant needs renewing |
+| `PATCH` | `/api/inbox/[id]` | Marks an email handled, or restores it | Zod `{ dismissed: boolean }`; 404 for unknown ID |
 
 Sign-in failures deliberately return one generic message rather than distinguishing an unknown account from a wrong password, which would enumerate registered users.
 
@@ -576,6 +647,7 @@ No additional public API routes are implemented.
 | Meeting brief | objective, context, questions, agenda, provider | Belongs to a meeting and proposes actions |
 | Proposed action | type, title, description, status | Belongs to a meeting |
 | Audit log | action, status, meeting, actor, timestamp | Appended after a human decision |
+| Tracked email | subject, sender, snippet, category, needs-reply, reason, deadline, dismissal | Belongs to a user, not to a meeting |
 
 ## Claude Code development workflow
 
@@ -644,7 +716,10 @@ Use `.mcp.json.example` as a placeholder-only client configuration and replace i
 - The product retrieves context for one selected meeting, not an unbounded personal corpus.
 - Anthropic credentials stay in server-only modules and environment variables.
 - All model output is untrusted until it passes the Zod contract.
-- Context is labeled untrusted in the Anthropic system instruction to reduce prompt-injection risk.
+- Context is labeled untrusted in both Anthropic system instructions — brief generation and inbox triage — to reduce prompt-injection risk.
+- Third-party scopes are read-only (`calendar.readonly`, `gmail.readonly`) and no code path writes to a calendar or mailbox.
+- Only subjects, senders, and Gmail snippets are read; message bodies are never fetched, stored, or sent to a model.
+- OAuth access and refresh tokens are encrypted with AES-256-GCM before storage, so a database dump does not yield working credentials.
 - Route errors avoid stack traces, raw provider responses, and credentials.
 - Production SQL scopes rows by `user_id` and includes example RLS.
 - The MCP server is static and read-only.
@@ -660,7 +735,7 @@ Approval in this MVP means **permission recorded**, not **side effect executed**
 
 ## Testing strategy
 
-The suite contains 109 test cases across seventeen test files:
+The suite contains 123 test cases across eighteen test files:
 
 1. meeting brief Zod validation, including an invalid unsafe action type;
 2. deterministic mock AI generation;
@@ -678,7 +753,8 @@ The suite contains 109 test cases across seventeen test files:
 14. Google Calendar event mapping, including all-day exclusion, room filtering, and HTML stripping;
 15. the authorization URL, asserting PKCE S256, forced consent, and read-only scope;
 16. Anthropic error translation, asserting a billing failure is named as one and the provider's raw message never reaches the caller;
-17. meeting-card content and accessible navigation.
+17. job-inbox triage, covering the bounded Gmail query, heuristic precedence (a rejection outranks scheduling words in the same message), and the merge rules that keep a partial model response from dropping emails or admitting a hallucinated id;
+18. meeting-card content and accessible navigation.
 
 The Supabase repositories are covered by typecheck and by the interface they share with the demo implementations; verifying their queries and RLS policies against a live multi-user project is still outstanding and is listed under known limitations.
 
@@ -740,7 +816,7 @@ Set these project environment variables, then redeploy:
 | `ANTHROPIC_API_KEY` | Optional; enables the real provider |
 | `ANTHROPIC_MODEL` | Optional; a supported model identifier |
 
-Then apply both migrations in `supabase/migrations` to the Supabase project, and register `https://<deployment>/api/inngest` as an Inngest app so the scheduled functions are discovered.
+Then apply every migration in `supabase/migrations` to the Supabase project in numeric order, and register `https://<deployment>/api/inngest` as an Inngest app so the scheduled functions are discovered.
 
 `DEMO_MODE` must be set **before** the build, not only at runtime: the identity-bearing pages are `force-dynamic` so they cannot be prerendered with the wrong mode, but the landing page's entry link is resolved during the build.
 
@@ -779,7 +855,10 @@ Interactive pages call the same APIs a separate client could use. This makes loa
 
 ## Known limitations
 
-- No live Gmail, Slack, Asana, or other third-party connection. Google Calendar is implemented but read-only, and imports events only — it never writes to a calendar.
+- No Slack, Asana, or other third-party connection. Google is implemented but read-only throughout: Calendar imports events and never writes back, and Gmail is read for snippets only — nothing sends, replies, or marks a message read.
+- Inbox classification is a judgment call, not a guarantee. The heuristic floor is keyword-based and the model refines rather than verifies it, so a miscategorised email is possible; every row carries its reason so a wrong call is visible, and dismissal stays a human action.
+- The mailbox scan is user-triggered. There is no background ingestion, so the inbox is only as current as the last **Check inbox**.
+- The job-application inbox is unavailable in demo mode, which has no mailbox; the API returns an empty list rather than synthesizing one.
 - No actual action execution.
 - No brief history or action re-open workflow; regenerating a brief replaces it.
 - No organization membership, role-aware approval, or re-authentication for sensitive decisions.
@@ -798,7 +877,7 @@ Interactive pages call the same APIs a separate client could use. This makes loa
 The safest path from MVP to production is incremental:
 
 1. **Identity and persistence:** ✅ Supabase Auth, server-side session resolution, and persistent repository adapters are implemented. Remaining: a transaction covering the decision-plus-audit write, and RLS tested against multiple live identities.
-2. **Meeting-scoped connectors:** connect calendar metadata first, then allow a user to explicitly select mail/note sources for a meeting.
+2. **Meeting-scoped connectors:** ✅ read-only Google Calendar and Gmail are connected, with encrypted tokens, revocable consent, and snippet-only mail access. Remaining: letting a user explicitly select which sources inform a given meeting, and note connectors.
 3. **Retrieval pipeline:** normalize, embed, filter by tenant/time/type, rank, threshold, and preserve citations.
 4. **Durable generation:** ✅ the Inngest functions are served, with fan-out, idempotency, retries, and concurrency limits. Remaining: provider timeouts and generation history.
 5. **Approval hardening:** add payload previews, role-aware approval, immutable decision records, and re-authentication for sensitive actions.
@@ -812,7 +891,7 @@ Every phase keeps the demo boundary honest: a feature moves from “planned” t
 | Phase | Outcome | Exit criterion |
 | --- | --- | --- |
 | 1 | Authenticated persistent workspace | Implemented; multi-user isolation verified locally. State-survives-deploys pending a hosted deployment |
-| 2 | Meeting-scoped calendar context | User can connect, select, revoke, and delete data |
+| 2 | Meeting-scoped calendar and mail context | Implemented for Google; connect, sync, and revoke work end to end. Per-meeting source selection pending |
 | 3 | Citation-preserving retrieval | Every brief claim maps to an inspectable source |
 | 4 | Durable scheduled briefs | Implemented; idempotent replay and permanent-failure handling observed against the Inngest dev server |
 | 5 | One controlled execution adapter | Approval, execution, and failure are separately audited |
@@ -828,8 +907,10 @@ Start with these files:
 4. `src/app/api/actions/[id]/route.ts` for approval and audit behavior.
 5. `src/features/meetings/meeting-detail-client.tsx` for the complete user flow.
 6. `src/features/actions/repositories.test.ts` for decision transition coverage.
-7. `supabase/migrations/001_initial_schema.sql` for the production data and RLS sketch.
-8. `CLAUDE.md`, `.claude/`, and `tools/contextflow-mcp/` for the AI development workflow.
+7. `supabase/migrations/001_initial_schema.sql` for the production data and RLS sketch, then `003_role_grants.sql` for why grants and policies are separate.
+8. `src/lib/integrations/google/oauth.ts` and `src/lib/crypto/tokens.ts` for the OAuth and token-encryption boundary.
+9. `src/lib/integrations/google/job-inbox.ts` and `scan-job-inbox.ts` for the heuristic-floor-plus-model classification design.
+10. `CLAUDE.md`, `.claude/`, and `tools/contextflow-mcp/` for the AI development workflow.
 
 Then run the four verification commands and complete the three-minute demo.
 
